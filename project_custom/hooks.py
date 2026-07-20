@@ -3,6 +3,12 @@ app_title = "Project Custom"
 app_publisher = "Nave Industries"
 app_description = "Project Journal Entry Connection"
 app_email = "industriesnave@gmail.com"
+
+after_install = "project_custom.install.after_install"
+
+override_doctype_dashboards = {
+    "Project": "project_custom.dashboard.get_project_dashboard"
+}
 app_license = "mit"
 
 # Apps
