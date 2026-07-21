@@ -262,3 +262,13 @@ app_license = "mit"
 # List of apps whose translatable strings should be excluded from this app's translations.
 # ignore_translatable_strings_from = []
 
+
+
+doc_events = {
+    "Journal Entry": {
+        "before_update_after_submit": "project_custom.project_cost.store_previous_project",
+        "on_submit": "project_custom.project_cost.recalculate_for_journal_entry",
+        "on_update_after_submit": "project_custom.project_cost.recalculate_for_journal_entry",
+        "on_cancel": "project_custom.project_cost.recalculate_for_journal_entry",
+    }
+}
