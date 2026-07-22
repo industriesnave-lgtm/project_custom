@@ -45,3 +45,6 @@ def ensure_custom_fields():
 def recalculate_all_project_journal_entry_costs():
     for project in frappe.get_all("Project", pluck="name"):
         recalculate_project_journal_entry_cost(project)
+def after_migrate():
+    ensure_custom_fields()
+    recalculate_all_project_journal_entry_costs()

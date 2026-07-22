@@ -10,7 +10,7 @@ override_doctype_dashboards = {
     "Project": "project_custom.dashboard.get_project_dashboard"
 }
 app_license = "mit"
-
+after_migrate = "project_custom.install.after_migrate"
 # Apps
 # ------------------
 
