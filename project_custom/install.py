@@ -27,6 +27,33 @@ def ensure_custom_fields():
             "read_only": 1,
             "no_copy": 1,
         },
+        {
+            "dt": "Project",
+            "label": "Total Cost Including Journal Entry",
+            "fieldname": "custom_total_cost_including_journal_entry",
+            "fieldtype": "Currency",
+            "insert_after": "custom_total_journal_entry_cost",
+            "read_only": 1,
+            "no_copy": 1,
+        },
+        {
+            "dt": "Project",
+            "label": "Gross Margin Including Journal Entry",
+            "fieldname": "custom_gross_margin_including_journal_entry",
+            "fieldtype": "Currency",
+            "insert_after": "gross_margin",
+            "read_only": 1,
+            "no_copy": 1,
+        },
+        {
+            "dt": "Project",
+            "label": "Gross Margin % Including Journal Entry",
+            "fieldname": "custom_gross_margin_percent_including_journal_entry",
+            "fieldtype": "Percent",
+            "insert_after": "custom_gross_margin_including_journal_entry",
+            "read_only": 1,
+            "no_copy": 1,
+        },
     ]
 
     for field in fields:
@@ -45,6 +72,8 @@ def ensure_custom_fields():
 def recalculate_all_project_journal_entry_costs():
     for project in frappe.get_all("Project", pluck="name"):
         recalculate_project_journal_entry_cost(project)
+
+
 def after_migrate():
     ensure_custom_fields()
     recalculate_all_project_journal_entry_costs()
