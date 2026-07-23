@@ -4,3 +4,4 @@
 
 [post_model_sync]
 project_custom.patches.v1_0.add_journal_entry_cost_field
+project_custom.patches.v1_1.ensure_project_cost_summary
