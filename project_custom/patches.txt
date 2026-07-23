@@ -5,3 +5,4 @@
 [post_model_sync]
 project_custom.patches.v1_0.add_journal_entry_cost_field
 project_custom.patches.v1_1.ensure_project_cost_summary
+project_custom.patches.v1_2.create_nave_sales_dashboard_page
