@@ -3,13 +3,13 @@ from frappe.utils import get_first_day, getdate, nowdate
 
 
 def get_total(filters):
-    result = frappe.get_list(
+    values = frappe.get_all(
         "Sales Invoice",
         filters=filters,
-        fields=["sum(grand_total) as total"],
+        pluck="grand_total",
         limit_page_length=0,
     )
-    return float(result[0].total or 0) if result else 0
+    return sum(float(value or 0) for value in values)
 
 
 @frappe.whitelist()
@@ -54,17 +54,15 @@ def get_sales_dashboard():
         )
     )
 
-    pending_orders = frappe.get_list(
+    pending_orders = frappe.db.count(
         "Sales Order",
         filters={
             "docstatus": 1,
             "status": ["not in", ["Closed", "Completed", "Cancelled"]],
         },
-        fields=["count(name) as total"],
-        limit_page_length=0,
     )
 
-    recent_invoices = frappe.get_list(
+    recent_invoices = frappe.get_all(
         "Sales Invoice",
         filters={"docstatus": 1},
         fields=[
@@ -85,8 +83,6 @@ def get_sales_dashboard():
         "pending_collection": pending_collection,
         "overdue_amount": overdue_amount,
         "credit_note_amount": credit_note_amount,
-        "pending_orders": int(pending_orders[0].total or 0)
-        if pending_orders
-        else 0,
+        "pending_orders": pending_orders,
         "recent_invoices": recent_invoices,
     }
