@@ -12,6 +12,10 @@ override_doctype_dashboards = {
 app_license = "mit"
 app_include_js = "/assets/project_custom/js/role_dashboard_redirect.js"
 after_migrate = "project_custom.install.after_migrate"
+doctype_js = {
+    "Sales Invoice": "public/js/submitted_invoice_edit.js",
+    "Purchase Invoice": "public/js/submitted_invoice_edit.js",
+}
 # Apps
 # ------------------
 
