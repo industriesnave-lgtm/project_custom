@@ -16,11 +16,15 @@ ALLOWED_FIELDS = {
 }
 
 
+
 def require_super_user():
-    if frappe.session.user != "Administrator" and not frappe.has_role("System Manager"):
-        frappe.throw("Only System Manager can edit a submitted invoice.", frappe.PermissionError)
+    roles = frappe.get_roles(frappe.session.user)
 
-
+    if frappe.session.user != "Administrator" and "System Manager" not in roles:
+        frappe.throw(
+            "Only System Manager can edit a submitted invoice.",
+            frappe.PermissionError,
+        )
 def get_allowed_fields(doctype):
     if doctype not in ALLOWED_FIELDS:
         frappe.throw("Only Sales Invoice and Purchase Invoice are supported.")
