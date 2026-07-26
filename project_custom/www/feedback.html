@@ -1,0 +1,238 @@
+{% extends "templates/web.html" %}
+
+{% block page_content %}
+<link rel="stylesheet" href="/assets/project_custom/css/customer_feedback.css">
+
+<main class="feedback-page">
+	<section class="feedback-shell">
+		<header class="feedback-header">
+			<img
+				src="/assets/project_custom/images/nave-logo.png"
+				alt="Nave Industries"
+				class="feedback-logo"
+			>
+			<div>
+				<h1>Customer Feedback</h1>
+				<p>Your feedback helps us improve our service quality.</p>
+			</div>
+		</header>
+
+		<div id="feedback-form-container">
+			<form id="customer-feedback-form" novalidate>
+				<input
+					type="text"
+					name="company_website"
+					class="feedback-honeypot"
+					tabindex="-1"
+					autocomplete="off"
+				>
+
+				<section class="feedback-card">
+					<div class="section-heading">
+						<span class="section-number">1</span>
+						<div>
+							<h2>Customer Details</h2>
+							<p>Please tell us about you and your project.</p>
+						</div>
+					</div>
+
+					<div class="feedback-grid">
+						<label class="feedback-field">
+							<span>Customer / Company Name *</span>
+							<input
+								type="text"
+								name="customer_company"
+								maxlength="140"
+								required
+							>
+						</label>
+
+						<label class="feedback-field">
+							<span>Contact Person *</span>
+							<input
+								type="text"
+								name="contact_person"
+								maxlength="140"
+								required
+							>
+						</label>
+
+						<label class="feedback-field">
+							<span>Mobile Number</span>
+							<input
+								type="tel"
+								name="mobile_number"
+								maxlength="30"
+							>
+						</label>
+
+						<label class="feedback-field">
+							<span>Email</span>
+							<input
+								type="email"
+								name="email"
+								maxlength="140"
+							>
+						</label>
+
+						<label class="feedback-field">
+							<span>Project / Site</span>
+							<input
+								type="text"
+								name="project_site"
+								maxlength="140"
+							>
+						</label>
+
+						<label class="feedback-field">
+							<span>Service Type *</span>
+							<select name="service_type" required>
+								<option value="">Select Service Type</option>
+								<option>Electrical Works</option>
+								<option>Civil Works</option>
+								<option>Fabrication Works</option>
+								<option>Manpower Supply</option>
+								<option>Machinery Rental</option>
+								<option>Material Supply</option>
+								<option>Project Execution</option>
+								<option>Other</option>
+							</select>
+						</label>
+					</div>
+				</section>
+
+				<section class="feedback-card">
+					<div class="section-heading">
+						<span class="section-number">2</span>
+						<div>
+							<h2>Rate Our Service</h2>
+							<p>Select between one and five stars.</p>
+						</div>
+					</div>
+
+					<div class="rating-grid">
+						{% set rating_fields = [
+							("work_quality", "Work Quality"),
+							("safety_compliance", "Safety Compliance"),
+							("communication", "Communication"),
+							("timely_completion", "Timely Completion"),
+							("team_behaviour", "Team Behaviour"),
+							("overall_rating", "Overall Rating")
+						] %}
+
+						{% for fieldname, label in rating_fields %}
+						<div class="rating-field" data-rating-field="{{ fieldname }}">
+							<div class="rating-label">
+								<span>{{ label }} *</span>
+								<strong class="rating-value">Not rated</strong>
+							</div>
+
+							<div
+								class="star-rating"
+								role="radiogroup"
+								aria-label="{{ label }}"
+							>
+								{% for star in range(1, 6) %}
+								<button
+									type="button"
+									class="star-button"
+									data-value="{{ star }}"
+									aria-label="{{ star }} star"
+								>★</button>
+								{% endfor %}
+							</div>
+
+							<input
+								type="hidden"
+								name="{{ fieldname }}"
+								value=""
+								required
+							>
+						</div>
+						{% endfor %}
+					</div>
+				</section>
+
+				<section class="feedback-card">
+					<div class="section-heading">
+						<span class="section-number">3</span>
+						<div>
+							<h2>Your Feedback</h2>
+							<p>Tell us what went well and what we can improve.</p>
+						</div>
+					</div>
+
+					<label class="feedback-field feedback-field-full">
+						<span>Feedback *</span>
+						<textarea
+							name="feedback"
+							rows="6"
+							maxlength="2000"
+							required
+							placeholder="Please share your experience with Nave Industries..."
+						></textarea>
+					</label>
+
+					<label class="testimonial-check">
+						<input type="checkbox" name="testimonial_permission">
+						<span>May we publish this feedback as a testimonial?</span>
+					</label>
+				</section>
+
+				<div id="feedback-error" class="feedback-error" hidden></div>
+
+				<button type="submit" class="feedback-submit">
+					<span class="submit-label">Submit Feedback</span>
+					<span class="submit-loading" hidden>
+						<span class="feedback-spinner"></span>
+						Submitting...
+					</span>
+				</button>
+
+				<p class="feedback-privacy">
+					Your information will be used only for service improvement
+					and authorised follow-up.
+				</p>
+			</form>
+		</div>
+
+		<section id="feedback-success" class="feedback-success" hidden>
+			<div class="success-icon">✓</div>
+			<h2>Thank you for your valuable feedback!</h2>
+			<p>
+				Your response has been submitted successfully. Your feedback
+				helps Nave Industries improve its services.
+			</p>
+
+			<div class="feedback-summary">
+				<strong>Your Feedback</strong>
+				<p id="submitted-feedback-text"></p>
+			</div>
+
+			<div class="success-actions">
+				<button type="button" id="copy-feedback" class="secondary-button">
+					Copy Feedback
+				</button>
+
+				<a
+					id="google-review-button"
+					class="google-review-button"
+					href="{{ google_review_url }}"
+					target="_blank"
+					rel="noopener noreferrer"
+				>
+					Leave a Google Review
+				</a>
+			</div>
+		</section>
+	</section>
+</main>
+
+<script>
+	window.naveFeedbackConfig = {
+		formStartedAt: Date.now() / 1000,
+		googleReviewUrl: {{ google_review_url | tojson }}
+	};
+</script>
+<script src="/assets/project_custom/js/customer_feedback.js"></script>
+{% endblock %}
