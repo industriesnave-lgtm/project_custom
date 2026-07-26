@@ -1,6 +1,8 @@
+import re
+
 import frappe
 from frappe.model.document import Document
-from frappe.utils import flt, now_datetime
+from frappe.utils import escape_html, flt, now_datetime
 
 
 RATING_FIELDS = (
@@ -22,6 +24,16 @@ def rating_to_stars(value):
 	return value
 
 
+def get_notification_recipients(settings):
+	raw_recipients = settings.notification_recipients or ""
+
+	return [
+		email.strip()
+		for email in re.split(r"[,;\n]+", raw_recipients)
+		if email.strip()
+	]
+
+
 class CustomerFeedback(Document):
 	def before_insert(self):
 		if not self.submitted_on:
@@ -30,6 +42,11 @@ class CustomerFeedback(Document):
 	def validate(self):
 		self.validate_ratings()
 		self.set_follow_up_status()
+
+	def after_insert(self):
+		if self.follow_up_status in ("Urgent", "Review Required"):
+			self.send_follow_up_notification()
+			self.create_follow_up_assignment()
 
 	def validate_ratings(self):
 		for fieldname in RATING_FIELDS:
@@ -48,3 +65,73 @@ class CustomerFeedback(Document):
 			self.follow_up_status = "Review Required"
 		else:
 			self.follow_up_status = "Urgent"
+
+	def send_follow_up_notification(self):
+		settings = frappe.get_single("Customer Feedback Settings")
+		recipients = get_notification_recipients(settings)
+
+		if not recipients:
+			return
+
+		overall_stars = rating_to_stars(self.overall_rating)
+		subject = (
+			f"{self.follow_up_status}: Customer Feedback "
+			f"from {self.customer_company}"
+		)
+
+		message = f"""
+			<h3>{escape_html(subject)}</h3>
+			<p><strong>Contact Person:</strong>
+				{escape_html(self.contact_person or "")}
+			</p>
+			<p><strong>Project / Site:</strong>
+				{escape_html(self.project_site or "")}
+			</p>
+			<p><strong>Service Type:</strong>
+				{escape_html(self.service_type or "")}
+			</p>
+			<p><strong>Overall Rating:</strong>
+				{overall_stars:.0f} / 5
+			</p>
+			<p><strong>Feedback:</strong><br>
+				{escape_html(self.feedback or "")}
+			</p>
+			<p>
+				<a href="{frappe.utils.get_url_to_form(self.doctype, self.name)}">
+					Open Feedback Record
+				</a>
+			</p>
+		"""
+
+		frappe.sendmail(
+			recipients=recipients,
+			subject=subject,
+			message=message,
+			delayed=True,
+		)
+
+	def create_follow_up_assignment(self):
+		settings = frappe.get_single("Customer Feedback Settings")
+		assignee = settings.follow_up_assignee
+
+		if not assignee:
+			return
+
+		frappe.get_doc(
+			{
+				"doctype": "ToDo",
+				"allocated_to": assignee,
+				"description": (
+					f"{self.follow_up_status}: Follow up with "
+					f"{self.customer_company}"
+				),
+				"reference_type": self.doctype,
+				"reference_name": self.name,
+				"priority": (
+					"High"
+					if self.follow_up_status == "Urgent"
+					else "Medium"
+				),
+				"status": "Open",
+			}
+		).insert(ignore_permissions=True)
