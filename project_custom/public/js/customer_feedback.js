@@ -106,8 +106,10 @@
 		if (reviewUrl) {
 			reviewButton.href = reviewUrl;
 			reviewButton.hidden = false; reviewButton.style.display = "";
+                        copyButton.hidden = false; copyButton.style.display = "";
 		} else {
 			reviewButton.hidden = true; reviewButton.style.display = "none";
+                        copyButton.hidden = true; copyButton.style.display = "none";
 		}
 
 		formContainer.hidden = true;
