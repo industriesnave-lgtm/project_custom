@@ -101,8 +101,7 @@
 		savedFeedback = response.feedback || payload.feedback || "";
 		submittedFeedback.textContent = savedFeedback;
 
-		const reviewUrl =
-			response.google_review_url || config.googleReviewUrl || "";
+            const reviewUrl = response.google_review_url || "";
 
 		if (reviewUrl) {
 			reviewButton.href = reviewUrl;
