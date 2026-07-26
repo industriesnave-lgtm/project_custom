@@ -217,6 +217,8 @@
 				<a
 					id="google-review-button"
 					class="google-review-button"
+                                        hidden
+                                        style="display: none;"
 					href="{{ google_review_url }}"
 					target="_blank"
 					rel="noopener noreferrer"
@@ -234,5 +236,5 @@
 		googleReviewUrl: {{ google_review_url | tojson }}
 	};
 </script>
-<script src="/assets/project_custom/js/customer_feedback.js"></script>
+<script src="/assets/project_custom/js/customer_feedback.js?v=20260727-1"></script>
 {% endblock %}
