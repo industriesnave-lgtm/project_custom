@@ -1,0 +1,204 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "format:FB-{YYYY}-{#####}",
+ "creation": "2026-07-26 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "customer_section",
+  "customer_company",
+  "contact_person",
+  "mobile_number",
+  "email",
+  "project_site",
+  "service_type",
+  "rating_section",
+  "work_quality",
+  "safety_compliance",
+  "communication",
+  "timely_completion",
+  "team_behaviour",
+  "overall_rating",
+  "feedback_section",
+  "feedback",
+  "testimonial_permission",
+  "tracking_section",
+  "google_review_status",
+  "follow_up_status",
+  "submitted_on",
+  "ip_address",
+  "user_agent"
+ ],
+ "fields": [
+  {
+   "fieldname": "customer_section",
+   "fieldtype": "Section Break",
+   "label": "Customer Details"
+  },
+  {
+   "fieldname": "customer_company",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Customer / Company Name",
+   "reqd": 1
+  },
+  {
+   "fieldname": "contact_person",
+   "fieldtype": "Data",
+   "label": "Contact Person",
+   "reqd": 1
+  },
+  {
+   "fieldname": "mobile_number",
+   "fieldtype": "Data",
+   "label": "Mobile Number",
+   "options": "Phone"
+  },
+  {
+   "fieldname": "email",
+   "fieldtype": "Data",
+   "label": "Email",
+   "options": "Email"
+  },
+  {
+   "fieldname": "project_site",
+   "fieldtype": "Data",
+   "label": "Project / Site"
+  },
+  {
+   "fieldname": "service_type",
+   "fieldtype": "Select",
+   "in_standard_filter": 1,
+   "label": "Service Type",
+   "options": "\nElectrical Works\nCivil Works\nFabrication Works\nManpower Supply\nMachinery Rental\nMaterial Supply\nProject Execution\nOther",
+   "reqd": 1
+  },
+  {
+   "fieldname": "rating_section",
+   "fieldtype": "Section Break",
+   "label": "Rate Our Service"
+  },
+  {
+   "fieldname": "work_quality",
+   "fieldtype": "Rating",
+   "label": "Work Quality",
+   "reqd": 1
+  },
+  {
+   "fieldname": "safety_compliance",
+   "fieldtype": "Rating",
+   "label": "Safety Compliance",
+   "reqd": 1
+  },
+  {
+   "fieldname": "communication",
+   "fieldtype": "Rating",
+   "label": "Communication",
+   "reqd": 1
+  },
+  {
+   "fieldname": "timely_completion",
+   "fieldtype": "Rating",
+   "label": "Timely Completion",
+   "reqd": 1
+  },
+  {
+   "fieldname": "team_behaviour",
+   "fieldtype": "Rating",
+   "label": "Team Behaviour",
+   "reqd": 1
+  },
+  {
+   "fieldname": "overall_rating",
+   "fieldtype": "Rating",
+   "in_list_view": 1,
+   "label": "Overall Rating",
+   "reqd": 1
+  },
+  {
+   "fieldname": "feedback_section",
+   "fieldtype": "Section Break",
+   "label": "Your Feedback"
+  },
+  {
+   "fieldname": "feedback",
+   "fieldtype": "Small Text",
+   "label": "Feedback",
+   "reqd": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "testimonial_permission",
+   "fieldtype": "Check",
+   "label": "May we publish this feedback as a testimonial?"
+  },
+  {
+   "fieldname": "tracking_section",
+   "fieldtype": "Section Break",
+   "label": "Internal Tracking"
+  },
+  {
+   "default": "Pending",
+   "fieldname": "google_review_status",
+   "fieldtype": "Select",
+   "in_standard_filter": 1,
+   "label": "Google Review Status",
+   "options": "Pending\nCompleted\nSkipped"
+  },
+  {
+   "fieldname": "follow_up_status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Follow-up Status",
+   "options": "Positive\nReview Required\nUrgent",
+   "read_only": 1
+  },
+  {
+   "default": "Now",
+   "fieldname": "submitted_on",
+   "fieldtype": "Datetime",
+   "label": "Submitted On",
+   "read_only": 1
+  },
+  {
+   "fieldname": "ip_address",
+   "fieldtype": "Data",
+   "label": "IP Address",
+   "read_only": 1
+  },
+  {
+   "fieldname": "user_agent",
+   "fieldtype": "Small Text",
+   "label": "User Agent",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-07-26 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Project Custom",
+ "name": "Customer Feedback",
+ "naming_rule": "Expression",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "submitted_on",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

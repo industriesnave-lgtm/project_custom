@@ -1,0 +1,92 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-07-26 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "portal_section",
+  "portal_enabled",
+  "google_review_url",
+  "security_section",
+  "hourly_submission_limit",
+  "duplicate_window_minutes",
+  "notification_section",
+  "notification_recipients",
+  "follow_up_assignee"
+ ],
+ "fields": [
+  {
+   "fieldname": "portal_section",
+   "fieldtype": "Section Break",
+   "label": "Portal Settings"
+  },
+  {
+   "default": "1",
+   "fieldname": "portal_enabled",
+   "fieldtype": "Check",
+   "label": "Portal Enabled"
+  },
+  {
+   "description": "Google Business review link shown after feedback submission.",
+   "fieldname": "google_review_url",
+   "fieldtype": "Data",
+   "label": "Google Review URL",
+   "options": "URL"
+  },
+  {
+   "fieldname": "security_section",
+   "fieldtype": "Section Break",
+   "label": "Security"
+  },
+  {
+   "default": "10",
+   "description": "Maximum feedback submissions allowed from one IP address per hour.",
+   "fieldname": "hourly_submission_limit",
+   "fieldtype": "Int",
+   "label": "Hourly Submission Limit"
+  },
+  {
+   "default": "30",
+   "description": "Reject identical submissions received within this many minutes.",
+   "fieldname": "duplicate_window_minutes",
+   "fieldtype": "Int",
+   "label": "Duplicate Protection (Minutes)"
+  },
+  {
+   "fieldname": "notification_section",
+   "fieldtype": "Section Break",
+   "label": "Notifications"
+  },
+  {
+   "description": "Enter one email address per line.",
+   "fieldname": "notification_recipients",
+   "fieldtype": "Small Text",
+   "label": "Notification Recipients"
+  },
+  {
+   "fieldname": "follow_up_assignee",
+   "fieldtype": "Link",
+   "label": "Follow-up Assignee",
+   "options": "User"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-07-26 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Project Custom",
+ "name": "Customer Feedback Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "read": 1,
+   "role": "System Manager",
+   "write": 1
+  }
+ ],
+ "states": [],
+ "track_changes": 1
+}
