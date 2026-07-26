@@ -105,9 +105,9 @@
 
 		if (reviewUrl) {
 			reviewButton.href = reviewUrl;
-			reviewButton.hidden = false;
+			reviewButton.hidden = false; reviewButton.style.display = "";
 		} else {
-			reviewButton.hidden = true;
+			reviewButton.hidden = true; reviewButton.style.display = "none";
 		}
 
 		formContainer.hidden = true;
