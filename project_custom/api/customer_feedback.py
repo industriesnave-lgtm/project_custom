@@ -173,6 +173,10 @@ def submit_feedback(data=None):
 		"ok": True,
 		"name": doc.name,
 		"follow_up_status": doc.follow_up_status,
-		"google_review_url": settings.google_review_url or "",
+		"google_review_url": (
+			(settings.google_review_url or "")
+			if doc.follow_up_status == "Positive"
+			else ""
+		),
 		"feedback": doc.feedback,
 	}
