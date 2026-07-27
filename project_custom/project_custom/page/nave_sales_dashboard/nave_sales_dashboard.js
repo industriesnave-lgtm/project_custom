@@ -4,6 +4,9 @@ frappe.pages["nave-sales-dashboard"].on_page_load = function (wrapper) {
 		title: "Sales Dashboard",
 		single_column: true,
 	});
+page.add_inner_button("← Nave Home", () => {
+	frappe.set_route("nave-home");
+});
 
 	const currency = (value) => format_currency(value || 0);
 

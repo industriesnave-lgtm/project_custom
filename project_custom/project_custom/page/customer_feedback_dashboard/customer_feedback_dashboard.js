@@ -4,7 +4,9 @@ frappe.pages["customer-feedback-dashboard"].on_page_load = function (wrapper) {
 		title: "Customer Feedback Dashboard",
 		single_column: true,
 	});
-
+	page.add_inner_button("← Nave Home", () => {
+		frappe.set_route("nave-home");
+	});
 	const escape = (value) =>
 		frappe.utils.escape_html(String(value || ""));
 
