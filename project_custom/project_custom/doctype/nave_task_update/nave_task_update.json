@@ -1,0 +1,123 @@
+{
+  "actions": [],
+  "allow_rename": 0,
+  "autoname": "format:NTU-{YYYY}-{#####}",
+  "creation": "2026-07-28 00:00:00.000000",
+  "doctype": "DocType",
+  "engine": "InnoDB",
+  "field_order": [
+    "task",
+    "update_by",
+    "employee",
+    "updated_on",
+    "status",
+    "progress",
+    "update_text",
+    "pending_reason",
+    "support_required",
+    "attachment"
+  ],
+  "fields": [
+    {
+      "fieldname": "task",
+      "fieldtype": "Link",
+      "in_list_view": 1,
+      "label": "Task",
+      "options": "NAVE Task",
+      "reqd": 1
+    },
+    {
+      "fieldname": "update_by",
+      "fieldtype": "Link",
+      "in_list_view": 1,
+      "label": "Updated By",
+      "options": "User",
+      "read_only": 1
+    },
+    {
+      "fieldname": "employee",
+      "fieldtype": "Link",
+      "label": "Employee",
+      "options": "Employee",
+      "read_only": 1
+    },
+    {
+      "fieldname": "updated_on",
+      "fieldtype": "Datetime",
+      "in_list_view": 1,
+      "label": "Updated On",
+      "read_only": 1
+    },
+    {
+      "fieldname": "status",
+      "fieldtype": "Select",
+      "in_list_view": 1,
+      "label": "Status",
+      "options": "Open\nWorking\nPending\nCompleted",
+      "reqd": 1
+    },
+    {
+      "fieldname": "progress",
+      "fieldtype": "Percent",
+      "in_list_view": 1,
+      "label": "Progress",
+      "reqd": 1
+    },
+    {
+      "fieldname": "update_text",
+      "fieldtype": "Small Text",
+      "label": "Progress Update / Reply",
+      "reqd": 1
+    },
+    {
+      "depends_on": "eval:doc.status=='Pending'",
+      "fieldname": "pending_reason",
+      "fieldtype": "Small Text",
+      "label": "Pending Reason"
+    },
+    {
+      "fieldname": "support_required",
+      "fieldtype": "Small Text",
+      "label": "Support Required"
+    },
+    {
+      "fieldname": "attachment",
+      "fieldtype": "Attach",
+      "label": "Attachment"
+    }
+  ],
+  "index_web_pages_for_search": 0,
+  "is_submittable": 0,
+  "links": [],
+  "modified": "2026-07-28 00:00:00.000000",
+  "modified_by": "Administrator",
+  "module": "Project Custom",
+  "name": "NAVE Task Update",
+  "naming_rule": "Expression",
+  "owner": "Administrator",
+"permissions": [
+  {
+    "create": 1,
+    "read": 1,
+    "role": "Employee"
+  },
+  {
+    "create": 1,
+    "read": 1,
+    "report": 1,
+    "role": "NAVE Task Manager"
+  },
+  {
+    "create": 1,
+    "delete": 1,
+    "read": 1,
+    "report": 1,
+    "role": "System Manager",
+    "write": 1
+  }
+],
+  "sort_field": "updated_on",
+  "sort_order": "DESC",
+  "states": [],
+  "track_changes": 1
+}

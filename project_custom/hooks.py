@@ -17,22 +17,30 @@ doctype_js = {
     "Sales Invoice": "public/js/submitted_invoice_edit.js",
     "Purchase Invoice": "public/js/submitted_invoice_edit.js",
 }
+permission_query_conditions = {
+    "NAVE Task": "project_custom.permissions.nave_task.get_task_query_conditions",
+    "NAVE Task Update": "project_custom.permissions.nave_task.get_update_query_conditions",
+}
+
+has_permission = {
+    "NAVE Task": "project_custom.permissions.nave_task.has_task_permission",
+    "NAVE Task Update": "project_custom.permissions.nave_task.has_update_permission",
+}
 # Apps
 # ------------------
 
 # required_apps = []
 
 # Each item in the list will be shown as an app in the apps page
-# add_to_apps_screen = [
-# 	{
-# 		"name": "project_custom",
-# 		"logo": "/assets/project_custom/logo.png",
-# 		"title": "Project Custom",
-# 		"route": "/project_custom",
-# 		"has_permission": "project_custom.api.permission.has_app_permission"
-# 	}
-# ]
-
+add_to_apps_screen = [
+    {
+        "name": "nave_task_management",
+        "logo": "/assets/project_custom/images/nave-task-management.svg",
+        "title": "Task Management",
+        "route": "/desk/nave-tasks",
+        "has_permission": "project_custom.api.nave_task.has_app_permission",
+    }
+]
 # Includes in <head>
 # ------------------
 
