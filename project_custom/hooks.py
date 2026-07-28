@@ -34,7 +34,7 @@ has_permission = {
 # Each item in the list will be shown as an app in the apps page
 add_to_apps_screen = [
     {
-        "name": "nave_task_management",
+        "name": "project_custom",
         "logo": "/assets/project_custom/images/nave-task-management.svg",
         "title": "Task Management",
         "route": "/desk/nave-tasks",
