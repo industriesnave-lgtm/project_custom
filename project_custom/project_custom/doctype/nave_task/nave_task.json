@@ -1,0 +1,257 @@
+{
+  "actions": [],
+  "allow_rename": 0,
+  "autoname": "format:NT-{YYYY}-{#####}",
+  "creation": "2026-07-28 00:00:00.000000",
+  "doctype": "DocType",
+  "engine": "InnoDB",
+  "field_order": [
+    "task_details_section",
+    "subject",
+    "description",
+    "category",
+    "priority",
+    "status",
+    "progress",
+    "assignment_section",
+    "assigned_to",
+    "assigned_employee",
+    "assigned_by",
+    "department",
+    "company",
+    "project",
+    "site",
+    "schedule_section",
+    "start_date",
+    "due_date",
+    "completed_on",
+    "is_overdue",
+    "latest_update_section",
+    "latest_update",
+    "pending_reason",
+    "support_required",
+    "completion_remarks",
+    "completion_attachment"
+  ],
+  "fields": [
+    {
+      "fieldname": "task_details_section",
+      "fieldtype": "Section Break",
+      "label": "Task Details"
+    },
+    {
+      "fieldname": "subject",
+      "fieldtype": "Data",
+      "in_list_view": 1,
+      "in_standard_filter": 1,
+      "label": "Task Title",
+      "reqd": 1
+    },
+    {
+      "fieldname": "description",
+      "fieldtype": "Text Editor",
+      "label": "Description",
+      "reqd": 1
+    },
+    {
+      "fieldname": "category",
+      "fieldtype": "Select",
+      "label": "Category",
+      "options": "General\nSales\nAccounts\nPurchase\nHR\nProject\nProduction\nQuality\nMaintenance\nCustomer Support"
+    },
+    {
+      "default": "Medium",
+      "fieldname": "priority",
+      "fieldtype": "Select",
+      "in_list_view": 1,
+      "in_standard_filter": 1,
+      "label": "Priority",
+      "options": "Low\nMedium\nHigh\nUrgent",
+      "reqd": 1
+    },
+    {
+      "default": "Open",
+      "fieldname": "status",
+      "fieldtype": "Select",
+      "in_list_view": 1,
+      "in_standard_filter": 1,
+      "label": "Status",
+      "options": "Open\nWorking\nPending\nCompleted\nCancelled",
+      "reqd": 1
+    },
+    {
+      "default": "0",
+      "fieldname": "progress",
+      "fieldtype": "Percent",
+      "in_list_view": 1,
+      "label": "Progress"
+    },
+    {
+      "fieldname": "assignment_section",
+      "fieldtype": "Section Break",
+      "label": "Assignment"
+    },
+    {
+      "fieldname": "assigned_to",
+      "fieldtype": "Link",
+      "in_list_view": 1,
+      "in_standard_filter": 1,
+      "label": "Assigned To",
+      "options": "User",
+      "reqd": 1
+    },
+    {
+      "fieldname": "assigned_employee",
+      "fieldtype": "Link",
+      "label": "Assigned Employee",
+      "options": "Employee",
+      "read_only": 1
+    },
+    {
+      "fieldname": "assigned_by",
+      "fieldtype": "Link",
+      "label": "Assigned By",
+      "options": "User",
+      "read_only": 1
+    },
+    {
+      "fieldname": "department",
+      "fieldtype": "Link",
+      "in_standard_filter": 1,
+      "label": "Department",
+      "options": "Department"
+    },
+    {
+      "fieldname": "company",
+      "fieldtype": "Link",
+      "label": "Company",
+      "options": "Company",
+      "reqd": 1
+    },
+    {
+      "fieldname": "project",
+      "fieldtype": "Link",
+      "label": "Project",
+      "options": "Project"
+    },
+    {
+      "fieldname": "site",
+      "fieldtype": "Data",
+      "label": "Site / Location"
+    },
+    {
+      "fieldname": "schedule_section",
+      "fieldtype": "Section Break",
+      "label": "Schedule"
+    },
+    {
+      "fieldname": "start_date",
+      "fieldtype": "Date",
+      "label": "Start Date"
+    },
+    {
+      "fieldname": "due_date",
+      "fieldtype": "Date",
+      "in_list_view": 1,
+      "in_standard_filter": 1,
+      "label": "Due Date",
+      "reqd": 1
+    },
+    {
+      "fieldname": "completed_on",
+      "fieldtype": "Datetime",
+      "label": "Completed On",
+      "read_only": 1
+    },
+    {
+      "default": "0",
+      "fieldname": "is_overdue",
+      "fieldtype": "Check",
+      "in_list_view": 1,
+      "label": "Overdue",
+      "read_only": 1
+    },
+    {
+      "fieldname": "latest_update_section",
+      "fieldtype": "Section Break",
+      "label": "Latest Progress"
+    },
+    {
+      "fieldname": "latest_update",
+      "fieldtype": "Small Text",
+      "label": "Latest Update",
+      "read_only": 1
+    },
+    {
+      "fieldname": "pending_reason",
+      "fieldtype": "Small Text",
+      "label": "Pending Reason",
+      "read_only": 1
+    },
+    {
+      "fieldname": "support_required",
+      "fieldtype": "Small Text",
+      "label": "Support Required",
+      "read_only": 1
+    },
+    {
+      "fieldname": "completion_remarks",
+      "fieldtype": "Small Text",
+      "label": "Completion Remarks",
+      "read_only": 1
+    },
+    {
+      "fieldname": "completion_attachment",
+      "fieldtype": "Attach",
+      "label": "Completion Attachment",
+      "read_only": 1
+    }
+  ],
+  "index_web_pages_for_search": 0,
+  "links": [
+    {
+      "link_doctype": "NAVE Task Update",
+      "link_fieldname": "task"
+    }
+  ],
+  "modified": "2026-07-28 00:00:00.000000",
+  "modified_by": "Administrator",
+  "module": "Project Custom",
+  "name": "NAVE Task",
+  "naming_rule": "Expression",
+  "owner": "Administrator",
+"permissions": [
+  {
+    "read": 1,
+    "role": "Employee"
+  },
+  {
+    "create": 1,
+    "email": 1,
+    "export": 1,
+    "print": 1,
+    "read": 1,
+    "report": 1,
+    "role": "NAVE Task Manager",
+    "share": 1,
+    "write": 1
+  },
+  {
+    "create": 1,
+    "delete": 1,
+    "email": 1,
+    "export": 1,
+    "print": 1,
+    "read": 1,
+    "report": 1,
+    "role": "System Manager",
+    "share": 1,
+    "write": 1
+  }
+],
+  "search_fields": "subject,assigned_to,department,project",
+  "sort_field": "due_date",
+  "sort_order": "ASC",
+  "states": [],
+  "track_changes": 1
+}
