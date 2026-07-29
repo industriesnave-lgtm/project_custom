@@ -184,6 +184,7 @@ def _apply_common_filters(
 	due_date=None,
 	due_before=None,
 	due_after=None,
+	search=None,
 ):
 	filters = _as_filter_list(filters)
 
@@ -201,6 +202,10 @@ def _apply_common_filters(
 		filters.append(["due_date", "<=", due_before])
 	if due_after:
 		filters.append(["due_date", ">=", due_after])
+	if search:
+		term = f"%{(search or '').strip()}%"
+		if term != "%%":
+			filters.append(["subject", "like", term])
 	return filters
 
 
@@ -262,6 +267,7 @@ def get_my_tasks(
 	due_date=None,
 	due_before=None,
 	due_after=None,
+	search=None,
 ):
 	"""Tasks assigned to the current user."""
 	require_login()
@@ -273,6 +279,7 @@ def get_my_tasks(
 		due_date=due_date,
 		due_before=due_before,
 		due_after=due_after,
+		search=search,
 	)
 	return _list_tasks(filters, page=page, page_length=page_length)
 
@@ -288,6 +295,7 @@ def get_tasks_created_by_me(
 	due_date=None,
 	due_before=None,
 	due_after=None,
+	search=None,
 ):
 	"""Tasks created by the current user (owner or assigned_by)."""
 	require_login()
@@ -301,6 +309,7 @@ def get_tasks_created_by_me(
 		due_date=due_date,
 		due_before=due_before,
 		due_after=due_after,
+		search=search,
 	)
 	or_filters = [
 		["owner", "=", user],
@@ -326,6 +335,7 @@ def get_all_tasks(
 	due_date=None,
 	due_before=None,
 	due_after=None,
+	search=None,
 ):
 	"""All tasks visible to the current user via permission hooks."""
 	require_login()
@@ -339,6 +349,7 @@ def get_all_tasks(
 		due_date=due_date,
 		due_before=due_before,
 		due_after=due_after,
+		search=search,
 	)
 	if creator:
 		or_filters = [
@@ -362,6 +373,7 @@ def get_overdue_tasks(
 	project=None,
 	assigned_user=None,
 	creator=None,
+	search=None,
 ):
 	require_login()
 	or_filters = None
@@ -371,6 +383,7 @@ def get_overdue_tasks(
 		priority=priority,
 		project=project,
 		assigned_user=assigned_user,
+		search=search,
 	)
 	if creator:
 		or_filters = [

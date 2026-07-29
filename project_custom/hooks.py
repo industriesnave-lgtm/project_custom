@@ -36,7 +36,7 @@ add_to_apps_screen = [
     {
         "name": "project_custom",
         "logo": "/assets/project_custom/images/nave-task-management.svg",
-        "title": "Task Management",
+        "title": "NAVE Tasks",
         "route": "/desk/nave-tasks",
         "has_permission": "project_custom.api.nave_task.has_app_permission",
     }
