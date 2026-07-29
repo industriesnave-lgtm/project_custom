@@ -2,6 +2,17 @@ import frappe
 from frappe.model.document import Document
 from frappe.utils import flt, now_datetime
 
+from project_custom.nave_task_utils import (
+	CONVERSATION_UPDATE_TYPES,
+	INTERNAL_NOTE_TYPE,
+	can_access_internal_notes,
+)
+from project_custom.permissions.nave_task import (
+	_is_admin,
+	_is_director,
+	_is_manager,
+)
+
 
 class NAVETaskUpdate(Document):
 	def before_insert(self):
@@ -18,10 +29,29 @@ class NAVETaskUpdate(Document):
 				"name",
 			)
 
+		self.validate_internal_note_permission()
+
 	def validate(self):
 		self.validate_progress()
 		self.validate_pending_reason()
 		self.prevent_existing_update_edit()
+		if self.is_new():
+			self.validate_internal_note_permission()
+
+	def validate_internal_note_permission(self):
+		if self.update_type != INTERNAL_NOTE_TYPE:
+			return
+
+		user = frappe.session.user
+		if not can_access_internal_notes(
+			is_admin=_is_admin(user),
+			is_director=_is_director(user),
+			is_manager=_is_manager(user),
+		):
+			frappe.throw(
+				"Only NAVE Task Directors, Managers, and System Managers can create Internal Notes.",
+				frappe.PermissionError,
+			)
 
 	def validate_progress(self):
 		progress = flt(self.progress)

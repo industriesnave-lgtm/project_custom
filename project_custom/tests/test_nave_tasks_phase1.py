@@ -236,6 +236,7 @@ class TestPermissionLogic(unittest.TestCase):
 		sql = build_task_permission_condition(
 			"creator@example.com",
 			is_admin=False,
+			is_director=False,
 			is_manager=False,
 			department=None,
 			escape=lambda v: f"'{v}'",

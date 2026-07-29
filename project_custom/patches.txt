@@ -1,5 +1,6 @@
 [pre_model_sync]
 project_custom.patches.v1_3.create_nave_task_manager_role
+project_custom.patches.v1_6.create_nave_task_director_role
 # Patches added in this section will be executed before doctypes are migrated
 # Read docs to understand patches: https://frappeframework.com/docs/v14/user/en/database-migrations
 

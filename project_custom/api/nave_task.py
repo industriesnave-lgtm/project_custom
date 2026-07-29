@@ -1,16 +1,21 @@
 import frappe
 from frappe.utils import add_days, cint, flt, now_datetime, nowdate
 
+from project_custom.nave_task_recurrence import normalize_support_required
 from project_custom.nave_task_utils import (
+	CONVERSATION_UPDATE_TYPES,
+	DIRECTOR_ROLE,
+	INTERNAL_NOTE_TYPE,
+	MANAGER_ROLE,
 	compute_is_overdue,
+	get_display_role,
 	normalize_progress,
 	to_plain_text,
 	user_can_access_task,
 	user_can_manage_task,
 	user_can_submit_progress_update,
 )
-from project_custom.nave_task_recurrence import normalize_support_required
-from project_custom.permissions.nave_task import MANAGER_ROLE
+from project_custom.permissions.nave_task import user_can_see_internal_notes
 
 
 TASK_LIST_FIELDS = [
@@ -76,6 +81,11 @@ def is_admin(user=None):
 	return user == "Administrator" or "System Manager" in roles
 
 
+def is_task_director(user=None):
+	user = user or frappe.session.user
+	return DIRECTOR_ROLE in frappe.get_roles(user)
+
+
 def is_task_manager(user=None):
 	user = user or frappe.session.user
 	return MANAGER_ROLE in frappe.get_roles(user)
@@ -94,7 +104,7 @@ def get_employee(user=None):
 			"user_id": user,
 			"status": "Active",
 		},
-		["name", "department"],
+		["name", "department", "employee_name"],
 		as_dict=True,
 	)
 
@@ -102,6 +112,15 @@ def get_employee(user=None):
 def get_user_department(user=None):
 	employee = get_employee(user)
 	return employee.department if employee else None
+
+
+def get_user_full_name(user=None):
+	user = user or frappe.session.user
+	return (
+		frappe.db.get_value("User", user, "full_name")
+		or frappe.db.get_value("User", user, "first_name")
+		or user
+	)
 
 
 def can_access_task_doc(task, user=None):
@@ -113,6 +132,7 @@ def can_access_task_doc(task, user=None):
 		assigned_by=task.assigned_by,
 		department=task.department,
 		is_admin=is_admin(user),
+		is_director=is_task_director(user),
 		is_manager=is_task_manager(user),
 		user_department=get_user_department(user),
 	)
@@ -126,6 +146,7 @@ def can_manage_task_doc(task, user=None):
 		assigned_by=task.assigned_by,
 		department=task.department,
 		is_admin=is_admin(user),
+		is_director=is_task_director(user),
 		is_manager=is_task_manager(user),
 		user_department=get_user_department(user),
 	)
@@ -137,6 +158,7 @@ def can_submit_progress_on_task(task, user=None):
 		user=user,
 		assigned_to=task.assigned_to,
 		is_admin=is_admin(user),
+		is_director=is_task_director(user),
 		is_manager=is_task_manager(user),
 		department=task.department,
 		user_department=get_user_department(user),
@@ -154,6 +176,41 @@ def get_task_for_user(task_name, user=None):
 		"You are not permitted to access this task.",
 		frappe.PermissionError,
 	)
+
+
+def enrich_timeline_item(row, task=None):
+	item = dict(row)
+	sender = item.get("update_by") or ""
+	employee_name = None
+	if item.get("employee"):
+		employee_name = frappe.db.get_value(
+			"Employee",
+			item.get("employee"),
+			"employee_name",
+		) or item.get("employee")
+
+	is_creator = False
+	if task is not None:
+		is_creator = sender in (
+			getattr(task, "owner", None),
+			getattr(task, "assigned_by", None),
+		)
+
+	item["update_text"] = to_plain_text(item.get("update_text"))
+	item["pending_reason"] = to_plain_text(item.get("pending_reason"))
+	item["update_type"] = item.get("update_type") or "Progress Update"
+	item["sender_user_id"] = sender
+	item["sender_full_name"] = get_user_full_name(sender) if sender else ""
+	item["employee_name"] = employee_name
+	item["display_role"] = get_display_role(
+		is_admin=is_admin(sender) if sender else False,
+		is_director=is_task_director(sender) if sender else False,
+		is_manager=is_task_manager(sender) if sender else False,
+		is_creator=is_creator,
+	)
+	item["datetime"] = item.get("updated_on") or item.get("creation")
+	return item
+
 
 
 def serialize_task(task_row):
@@ -428,7 +485,14 @@ def get_task_updates_list(
 	if task:
 		filters["task"] = task
 	if update_type:
+		if update_type == INTERNAL_NOTE_TYPE and not user_can_see_internal_notes():
+			frappe.throw(
+				"You are not permitted to view Internal Notes.",
+				frappe.PermissionError,
+			)
 		filters["update_type"] = update_type
+	elif not user_can_see_internal_notes():
+		filters["update_type"] = ["!=", INTERNAL_NOTE_TYPE]
 	if status:
 		filters["status"] = status
 	if update_by:
@@ -449,7 +513,7 @@ def get_task_updates_list(
 		"page": page,
 		"page_length": page_length,
 		"total": total,
-		"data": rows,
+		"data": [enrich_timeline_item(row) for row in rows],
 	}
 
 
@@ -495,26 +559,35 @@ def get_task_timeline(task_name):
 	require_login()
 	task = get_task_for_user(task_name)
 
+	filters = {"task": task.name}
+	if not user_can_see_internal_notes():
+		filters["update_type"] = ["!=", INTERNAL_NOTE_TYPE]
+
 	rows = frappe.get_list(
 		"NAVE Task Update",
-		filters={"task": task.name},
+		filters=filters,
 		fields=UPDATE_LIST_FIELDS,
 		order_by="updated_on asc, creation asc",
 		limit_page_length=1000,
 		ignore_permissions=False,
 	)
 
+	# Extra hard filter for Internal Notes (defense in depth).
 	timeline = []
 	for row in rows:
-		item = dict(row)
-		item["update_text"] = to_plain_text(item.get("update_text"))
-		item["pending_reason"] = to_plain_text(item.get("pending_reason"))
-		item["update_type"] = item.get("update_type") or "Progress Update"
-		timeline.append(item)
+		if row.get("update_type") == INTERNAL_NOTE_TYPE and not user_can_see_internal_notes():
+			continue
+		timeline.append(enrich_timeline_item(row, task))
 
 	return {
 		"task": serialize_task(task),
 		"timeline": timeline,
+		"can_post_internal_note": user_can_see_internal_notes(),
+		"allowed_update_types": list(
+			t
+			for t in CONVERSATION_UPDATE_TYPES
+			if t != INTERNAL_NOTE_TYPE or user_can_see_internal_notes()
+		),
 	}
 
 
@@ -659,24 +732,126 @@ def submit_update(
 
 @frappe.whitelist()
 def reply_to_task(task_name, message, attachment=None):
+	return post_task_message(
+		task_name=task_name,
+		message=message,
+		update_type="Reply",
+		attachment=attachment,
+	)
+
+
+@frappe.whitelist()
+def post_task_message(
+	task_name,
+	message,
+	update_type="Reply",
+	attachment=None,
+	progress=None,
+	status=None,
+):
+	"""
+	Inline conversation composer endpoint.
+	Supports Reply / Progress Update / Clarification Required /
+	Completion Update / Manager Instruction / Internal Note.
+	"""
 	require_login()
 	user = frappe.session.user
 	task = get_task_for_user(task_name, user)
 
+	update_type = (update_type or "Reply").strip()
+	if update_type not in CONVERSATION_UPDATE_TYPES:
+		frappe.throw("Invalid update type.")
+
+	if update_type == INTERNAL_NOTE_TYPE and not user_can_see_internal_notes(user):
+		frappe.throw(
+			"Only NAVE Task Directors, Managers, and System Managers can create Internal Notes.",
+			frappe.PermissionError,
+		)
+
+	if update_type == "Manager Instruction" and not (
+		is_admin(user) or is_task_director(user) or is_task_manager(user)
+	):
+		frappe.throw(
+			"Only managers, directors, and admins can post Manager Instructions.",
+			frappe.PermissionError,
+		)
+
 	if not (message or "").strip():
-		frappe.throw("Please enter a reply.")
+		frappe.throw("Please enter a message.")
+
+	if task.status == "Cancelled":
+		frappe.throw("Cancelled tasks cannot accept conversation messages.")
+
+	new_status = task.status
+	new_progress = flt(task.progress)
+
+	if update_type == "Progress Update" and can_submit_progress_on_task(task, user):
+		if status:
+			new_status = status
+		if progress is not None:
+			try:
+				new_progress = normalize_progress(new_status, progress)
+			except ValueError as exc:
+				frappe.throw(str(exc))
+	elif update_type == "Completion Update":
+		if not can_submit_progress_on_task(task, user) and not can_manage_task_doc(task, user):
+			frappe.throw(
+				"You are not permitted to post a Completion Update on this task.",
+				frappe.PermissionError,
+			)
+		new_status = "Completed"
+		new_progress = 100
 
 	update = _create_history_entry(
 		task,
-		update_type="Reply",
+		update_type=update_type,
 		update_text=message.strip(),
-		status=task.status,
-		progress=task.progress,
+		status=new_status,
+		progress=new_progress,
 		attachment=attachment,
 	)
-	task.db_set("latest_update", message.strip(), update_modified=True)
 
-	return {"ok": True, "task": task.name, "update": update.name}
+	# Apply task field changes only for progress/completion conversation types.
+	if update_type in ("Progress Update", "Completion Update") and (
+		new_status != task.status or flt(new_progress) != flt(task.progress)
+	):
+		if getattr(task, "flags", None) is not None:
+			task.flags.skip_field_change_log = True
+		task.db_set("status", new_status, update_modified=False)
+		task.db_set("progress", new_progress, update_modified=False)
+		task.db_set(
+			"is_overdue",
+			compute_is_overdue(task.due_date, new_status, nowdate()),
+			update_modified=False,
+		)
+
+	if update_type != INTERNAL_NOTE_TYPE:
+		task.db_set("latest_update", message.strip(), update_modified=True)
+
+	return {
+		"ok": True,
+		"task": task.name,
+		"update": getattr(update, "name", None),
+		"update_type": update_type,
+		"timeline_item": enrich_timeline_item(
+			{
+				"name": getattr(update, "name", None),
+				"task": task.name,
+				"update_by": getattr(update, "update_by", user),
+				"employee": getattr(update, "employee", None),
+				"updated_on": getattr(update, "updated_on", None),
+				"update_type": getattr(update, "update_type", update_type),
+				"status": getattr(update, "status", new_status),
+				"progress": getattr(update, "progress", new_progress),
+				"update_text": getattr(update, "update_text", message.strip()),
+				"pending_reason": getattr(update, "pending_reason", None),
+				"support_required": getattr(update, "support_required", None),
+				"attachment": getattr(update, "attachment", attachment),
+				"creation": getattr(update, "creation", None),
+			},
+			task,
+		),
+	}
 
 
 @frappe.whitelist()

@@ -76,11 +76,13 @@ frappe.pages["nave-tasks"].on_page_load = function (wrapper) {
 	const is_admin = () =>
 		current_user() === "Administrator" || frappe.user.has_role("System Manager");
 
+	const is_director = () => frappe.user.has_role("NAVE Task Director");
+
 	const is_manager = () => frappe.user.has_role("NAVE Task Manager");
 
 	const can_manage_task = (task) => {
 		const user = current_user();
-		if (is_admin()) return true;
+		if (is_admin() || is_director()) return true;
 		if (task.owner === user || task.assigned_by === user) return true;
 		if (
 			is_manager() &&
@@ -94,7 +96,7 @@ frappe.pages["nave-tasks"].on_page_load = function (wrapper) {
 
 	const can_submit_update = (task) => {
 		const user = current_user();
-		if (is_admin()) return true;
+		if (is_admin() || is_director()) return true;
 		if (task.assigned_to === user) return true;
 		if (
 			is_manager() &&
@@ -784,6 +786,23 @@ frappe.pages["nave-tasks"].on_page_load = function (wrapper) {
 		}
 	};
 
+	const type_css_class = (update_type) => {
+		const map = {
+			Reply: "nt-type-reply",
+			"Manager Instruction": "nt-type-manager",
+			"Internal Note": "nt-type-internal",
+			System: "nt-type-system",
+			"Status Change": "nt-type-system",
+			Reassignment: "nt-type-system",
+			Close: "nt-type-system",
+			"Recurrence Event": "nt-type-system",
+			"Completion Update": "nt-type-completion",
+			"Progress Update": "nt-type-progress",
+			"Clarification Required": "nt-type-clarification",
+		};
+		return map[update_type || "Reply"] || "nt-type-reply";
+	};
+
 	const timeline_html = (items) => {
 		if (!items.length) {
 			return `<div class="nt-empty">No updates yet. Start the discussion with a reply or progress update.</div>`;
@@ -792,18 +811,37 @@ frappe.pages["nave-tasks"].on_page_load = function (wrapper) {
 			<div class="nt-timeline">
 				${items
 					.map((item) => {
-						const who = item.update_by || item.employee || "User";
+						const who =
+							item.sender_full_name ||
+							item.update_by ||
+							item.employee_name ||
+							item.employee ||
+							"User";
 						const initial = String(who).trim().charAt(0).toUpperCase() || "?";
 						const attach = item.attachment || "";
 						const is_image = /\.(png|jpe?g|gif|webp)$/i.test(attach);
+						const type = item.update_type || "Progress Update";
 						return `
-						<div class="nt-timeline-item">
+						<div class="nt-timeline-item ${type_css_class(type)}">
 							<div class="nt-timeline-avatar">${escape(initial)}</div>
 							<div class="nt-timeline-bubble">
 								<div class="nt-timeline-meta">
 									<strong>${escape(who)}</strong>
-									<span class="nt-badge">${escape(item.update_type || "Progress Update")}</span>
-									<span>${escape(item.updated_on || "")}</span>
+									<span class="nt-role-badge role-${escape(
+										(item.display_role || "Employee").toLowerCase()
+									)}">${escape(item.display_role || "Employee")}</span>
+									<span class="nt-badge">${escape(type)}</span>
+									<span>${escape(item.datetime || item.updated_on || "")}</span>
+									${
+										item.sender_user_id
+											? `<span class="nt-muted">${escape(item.sender_user_id)}</span>`
+											: ""
+									}
+									${
+										item.employee_name
+											? `<span class="nt-muted">${escape(item.employee_name)}</span>`
+											: ""
+									}
 									${item.status ? `<span class="nt-badge status-${escape(item.status)}">${escape(item.status)}</span>` : ""}
 									${item.progress != null ? `<span>${escape(item.progress)}%</span>` : ""}
 								</div>
@@ -830,6 +868,28 @@ frappe.pages["nave-tasks"].on_page_load = function (wrapper) {
 		`;
 	};
 
+	const composer_html = (allowed_types = []) => {
+		const types = allowed_types.length
+			? allowed_types
+			: ["Reply", "Progress Update", "Clarification Required", "Completion Update"];
+		return `
+			<div class="nt-composer">
+				<h4>Post to conversation</h4>
+				<textarea class="form-control nt-composer-message" rows="3" placeholder="Write a message…"></textarea>
+				<div class="nt-composer-row">
+					<select class="form-control nt-composer-type">
+						${types
+							.map((t) => `<option value="${escape(t)}">${escape(t)}</option>`)
+							.join("")}
+					</select>
+					<input type="text" class="form-control nt-composer-attachment" placeholder="Attachment URL / file path" readonly>
+					<button type="button" class="btn btn-default btn-sm nt-composer-attach">Attach</button>
+					<button type="button" class="btn btn-primary btn-sm nt-composer-submit">Submit</button>
+				</div>
+			</div>
+		`;
+	};
+
 	const open_task_detail = async (task_name, focus_timeline = false) => {
 		const dialog = new frappe.ui.Dialog({
 			title: `Task ${task_name}`,
@@ -841,83 +901,131 @@ frappe.pages["nave-tasks"].on_page_load = function (wrapper) {
 			`<div class="nt-loading"><span class="nt-spinner"></span> Loading task…</div>`
 		);
 
-		try {
-			const payload = await call(APP.VIEW_API.timeline, { task_name });
-			const task = payload.task || {};
-			const actions = action_visibility(task);
-			const action_buttons = [];
-			if (actions.submit_update) {
+		const render_detail = async () => {
+			try {
+				const payload = await call(APP.VIEW_API.timeline, { task_name });
+				const task = payload.task || {};
+				const actions = action_visibility(task);
+				const action_buttons = [];
+				if (actions.submit_update) {
+					action_buttons.push(
+						`<button class="btn btn-primary btn-sm nt-detail-act" data-act="update">Submit Update</button>`
+					);
+				}
+				if (actions.reassign) {
+					action_buttons.push(
+						`<button class="btn btn-default btn-sm nt-detail-act" data-act="reassign">Reassign</button>`
+					);
+				}
+				if (actions.close_task) {
+					action_buttons.push(
+						`<button class="btn btn-danger btn-sm nt-detail-act" data-act="close">Close Task</button>`
+					);
+				}
 				action_buttons.push(
-					`<button class="btn btn-primary btn-sm nt-detail-act" data-act="update">Submit Update</button>`
+					`<a class="btn btn-default btn-sm" href="/app/nave-task/${encodeURIComponent(
+						task.name
+					)}" target="_blank" rel="noopener">Open Form</a>`
 				);
-			}
-			if (actions.reply) {
-				action_buttons.push(
-					`<button class="btn btn-default btn-sm nt-detail-act" data-act="reply">Reply</button>`
-				);
-			}
-			if (actions.reassign) {
-				action_buttons.push(
-					`<button class="btn btn-default btn-sm nt-detail-act" data-act="reassign">Reassign</button>`
-				);
-			}
-			if (actions.close_task) {
-				action_buttons.push(
-					`<button class="btn btn-danger btn-sm nt-detail-act" data-act="close">Close Task</button>`
-				);
-			}
-			action_buttons.push(
-				`<a class="btn btn-default btn-sm" href="/app/nave-task/${encodeURIComponent(
-					task.name
-				)}" target="_blank" rel="noopener">Open Form</a>`
-			);
 
-			dialog.fields_dict.body.$wrapper.html(`
-				<div class="nt-detail-grid">
-					<div class="nt-detail-section">
-						<h4>${escape(task.subject || task_name)}</h4>
-						<div class="nt-badges">
-							<span class="nt-badge status-${escape(task.status)}">${escape(task.status)}</span>
-							<span class="nt-badge priority-${escape(task.priority)}">${escape(task.priority)}</span>
-							${due_badges(task).join("")}
+				const show_composer = actions.reply || actions.submit_update;
+				dialog.fields_dict.body.$wrapper.html(`
+					<div class="nt-detail-grid">
+						<div class="nt-detail-section">
+							<h4>${escape(task.subject || task_name)}</h4>
+							<div class="nt-badges">
+								<span class="nt-badge status-${escape(task.status)}">${escape(task.status)}</span>
+								<span class="nt-badge priority-${escape(task.priority)}">${escape(task.priority)}</span>
+								${due_badges(task).join("")}
+							</div>
+							<div class="nt-task-desc">${escape(task.description || "No description")}</div>
+							<div class="nt-meta">
+								<div><b>ID:</b> ${escape(task.name)}</div>
+								<div><b>Assignee:</b> ${escape(task.assigned_to || "-")}</div>
+								<div><b>Created by:</b> ${escape(task.assigned_by || task.owner || "-")}</div>
+								<div><b>Project:</b> ${escape(task.project || "-")}</div>
+								<div><b>Due:</b> ${escape(task.due_date || "-")}</div>
+								<div><b>Progress:</b> ${escape(task.progress || 0)}%</div>
+								<div><b>Overdue:</b> ${as_int(task.is_overdue) ? "Yes" : "No"}</div>
+								<div><b>Latest:</b> ${escape(task.latest_update || "-")}</div>
+							</div>
+							<div class="nt-actions" style="margin-top:12px;">${action_buttons.join("")}</div>
 						</div>
-						<div class="nt-task-desc">${escape(task.description || "No description")}</div>
-						<div class="nt-meta">
-							<div><b>ID:</b> ${escape(task.name)}</div>
-							<div><b>Assignee:</b> ${escape(task.assigned_to || "-")}</div>
-							<div><b>Created by:</b> ${escape(task.assigned_by || task.owner || "-")}</div>
-							<div><b>Project:</b> ${escape(task.project || "-")}</div>
-							<div><b>Due:</b> ${escape(task.due_date || "-")}</div>
-							<div><b>Progress:</b> ${escape(task.progress || 0)}%</div>
-							<div><b>Overdue:</b> ${as_int(task.is_overdue) ? "Yes" : "No"}</div>
-							<div><b>Latest:</b> ${escape(task.latest_update || "-")}</div>
+						<div class="nt-detail-section">
+							<h4>Discussion timeline</h4>
+							${timeline_html(payload.timeline || [])}
+							${show_composer ? composer_html(payload.allowed_update_types || []) : ""}
 						</div>
-						<div class="nt-actions" style="margin-top:12px;">${action_buttons.join("")}</div>
 					</div>
-					<div class="nt-detail-section">
-						<h4>Discussion timeline</h4>
-						${timeline_html(payload.timeline || [])}
-					</div>
-				</div>
-			`);
+				`);
 
-			dialog.fields_dict.body.$wrapper.find(".nt-detail-act").on("click", function () {
-				const act = $(this).data("act");
-				dialog.hide();
-				if (act === "update") open_update_dialog(task);
-				if (act === "reply") open_reply_dialog(task.name);
-				if (act === "reassign") open_reassign_dialog(task.name);
-				if (act === "close") open_close_dialog(task.name);
-			});
+				dialog.fields_dict.body.$wrapper.find(".nt-detail-act").on("click", function () {
+					const act = $(this).data("act");
+					dialog.hide();
+					if (act === "update") open_update_dialog(task);
+					if (act === "reassign") open_reassign_dialog(task.name);
+					if (act === "close") open_close_dialog(task.name);
+				});
 
-			if (focus_timeline) {
-				dialog.$wrapper.find(".nt-timeline").get(0)?.scrollIntoView({ behavior: "smooth" });
+				const $wrap = dialog.fields_dict.body.$wrapper;
+				$wrap.find(".nt-composer-attach").on("click", () => {
+					new frappe.ui.FileUploader({
+						restrictions: {
+							allowed_file_types: [
+								"image/*",
+								".pdf",
+								".doc",
+								".docx",
+								".xls",
+								".xlsx",
+								".csv",
+							],
+						},
+						on_success(file) {
+							const path = file.file_url || file.name;
+							$wrap.find(".nt-composer-attachment").val(path);
+						},
+					});
+				});
+
+				$wrap.find(".nt-composer-submit").on("click", async () => {
+					const message = $wrap.find(".nt-composer-message").val();
+					const update_type = $wrap.find(".nt-composer-type").val();
+					const attachment = $wrap.find(".nt-composer-attachment").val();
+					if (!(message || "").trim()) {
+						frappe.msgprint("Please enter a message.");
+						return;
+					}
+					frappe.call({
+						method: "project_custom.api.nave_task.post_task_message",
+						args: {
+							task_name,
+							message,
+							update_type,
+							attachment: attachment || undefined,
+						},
+						freeze: true,
+						freeze_message: "Posting…",
+						callback(r) {
+							if (!r.message?.ok) return;
+							frappe.show_alert({ message: "Posted to conversation", indicator: "green" });
+							render_detail();
+							load_current(true);
+						},
+					});
+				});
+
+				if (focus_timeline) {
+					dialog.$wrapper.find(".nt-timeline").get(0)?.scrollIntoView({ behavior: "smooth" });
+				}
+			} catch (e) {
+				dialog.fields_dict.body.$wrapper.html(
+					`<div class="nt-error">Unable to load task details.</div>`
+				);
 			}
-		} catch (e) {
-			dialog.fields_dict.body.$wrapper.html(
-				`<div class="nt-error">Unable to load task details.</div>`
-			);
-		}
+		};
+
+		await render_detail();
 	};
 
 	const open_update_dialog = (task) => {

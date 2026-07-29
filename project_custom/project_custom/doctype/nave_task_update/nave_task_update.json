@@ -56,7 +56,7 @@
       "in_list_view": 1,
       "in_standard_filter": 1,
       "label": "Update Type",
-      "options": "Progress Update\nReply\nReassignment\nStatus Change\nClose\nSystem\nRecurrence Event"
+      "options": "Progress Update\nReply\nReassignment\nStatus Change\nClose\nSystem\nRecurrence Event\nClarification Required\nCompletion Update\nManager Instruction\nInternal Note"
     },
     {
       "fieldname": "status",
@@ -116,6 +116,12 @@
     "read": 1,
     "report": 1,
     "role": "NAVE Task Manager"
+  },
+  {
+    "create": 1,
+    "read": 1,
+    "report": 1,
+    "role": "NAVE Task Director"
   },
   {
     "create": 1,

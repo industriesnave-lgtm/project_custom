@@ -1,4 +1,4 @@
-"""Pure helpers for NAVE Tasks Phase 1 (permissions, overdue, plain text)."""
+"""Pure helpers for NAVE Tasks (permissions, overdue, plain text, conversation)."""
 
 from __future__ import annotations
 
@@ -7,6 +7,10 @@ from html import unescape
 
 TERMINAL_STATUSES = ("Completed", "Closed", "Cancelled")
 ACTIVE_STATUSES = ("Open", "Working", "Pending")
+
+MANAGER_ROLE = "NAVE Task Manager"
+DIRECTOR_ROLE = "NAVE Task Director"
+
 UPDATE_TYPES = (
 	"Progress Update",
 	"Reply",
@@ -14,7 +18,31 @@ UPDATE_TYPES = (
 	"Status Change",
 	"Close",
 	"System",
+	"Recurrence Event",
+	"Clarification Required",
+	"Completion Update",
+	"Manager Instruction",
+	"Internal Note",
 )
+
+CONVERSATION_UPDATE_TYPES = (
+	"Reply",
+	"Progress Update",
+	"Clarification Required",
+	"Completion Update",
+	"Manager Instruction",
+	"Internal Note",
+)
+
+INTERNAL_NOTE_TYPE = "Internal Note"
+
+TRACKED_FIELD_LABELS = {
+	"assigned_to": "Assigned To",
+	"status": "Status",
+	"progress": "Progress",
+	"priority": "Priority",
+	"due_date": "Due Date",
+}
 
 
 def is_terminal_status(status: str | None) -> bool:
@@ -36,7 +64,7 @@ def compute_is_overdue(due_date, status, today) -> int:
 
 
 def _parse_date(value: str):
-	from datetime import date, datetime
+	from datetime import datetime
 
 	value = (value or "").strip()
 	if not value:
@@ -60,10 +88,19 @@ def to_plain_text(value: str | None) -> str:
 	return text.strip()
 
 
+def is_elevated_viewer(*, is_admin: bool, is_director: bool) -> bool:
+	return bool(is_admin or is_director)
+
+
+def can_access_internal_notes(*, is_admin: bool, is_director: bool, is_manager: bool) -> bool:
+	return bool(is_admin or is_director or is_manager)
+
+
 def build_task_permission_condition(
 	user: str,
 	*,
 	is_admin: bool,
+	is_director: bool,
 	is_manager: bool,
 	department: str | None,
 	escape,
@@ -71,14 +108,14 @@ def build_task_permission_condition(
 	"""
 	SQL fragment for NAVE Task list/query permissions.
 
-	- Admins/System Managers: no restriction
+	- Admins / Directors / System Managers: no restriction
 	- Managers with department: assignee OR department OR creator
 	- Everyone else: assignee OR creator only
 	"""
 	if not user or user == "Guest":
 		return "1=0"
 
-	if is_admin:
+	if is_elevated_viewer(is_admin=is_admin, is_director=is_director):
 		return ""
 
 	escaped_user = escape(user)
@@ -107,12 +144,13 @@ def user_can_access_task(
 	assigned_by: str | None,
 	department: str | None,
 	is_admin: bool,
+	is_director: bool = False,
 	is_manager: bool,
 	user_department: str | None,
 ) -> bool:
 	if not user or user == "Guest":
 		return False
-	if is_admin:
+	if is_elevated_viewer(is_admin=is_admin, is_director=is_director):
 		return True
 	if assigned_to == user:
 		return True
@@ -130,13 +168,14 @@ def user_can_manage_task(
 	assigned_by: str | None,
 	department: str | None,
 	is_admin: bool,
+	is_director: bool = False,
 	is_manager: bool,
 	user_department: str | None,
 ) -> bool:
-	"""Creator, department manager, or system admin may reassign/close."""
+	"""Creator, director, department manager, or system admin may reassign/close."""
 	if not user or user == "Guest":
 		return False
-	if is_admin:
+	if is_elevated_viewer(is_admin=is_admin, is_director=is_director):
 		return True
 	if owner == user or assigned_by == user:
 		return True
@@ -150,14 +189,15 @@ def user_can_submit_progress_update(
 	user: str,
 	assigned_to: str | None,
 	is_admin: bool,
+	is_director: bool = False,
 	is_manager: bool,
 	department: str | None,
 	user_department: str | None,
 ) -> bool:
-	"""Employees may update only assigned tasks; managers may update department tasks."""
+	"""Employees may update only assigned tasks; managers/directors may update more broadly."""
 	if not user or user == "Guest":
 		return False
-	if is_admin:
+	if is_elevated_viewer(is_admin=is_admin, is_director=is_director):
 		return True
 	if assigned_to == user:
 		return True
@@ -173,3 +213,39 @@ def normalize_progress(status: str | None, progress) -> float:
 	if status == "Completed":
 		return 100.0
 	return value
+
+
+def get_display_role(
+	*,
+	is_admin: bool,
+	is_director: bool,
+	is_manager: bool,
+	is_creator: bool = False,
+) -> str:
+	if is_admin:
+		return "Admin"
+	if is_director:
+		return "Director"
+	if is_manager:
+		return "Manager"
+	if is_creator:
+		return "Creator"
+	return "Employee"
+
+
+def format_field_change_message(fieldname: str, old_value, new_value) -> str:
+	label = TRACKED_FIELD_LABELS.get(fieldname, fieldname)
+	old_display = old_value if old_value not in (None, "") else "—"
+	new_display = new_value if new_value not in (None, "") else "—"
+	return f"{label} changed from {old_display} to {new_display}."
+
+
+def values_differ(old_value, new_value, *, fieldname: str) -> bool:
+	if fieldname == "progress":
+		try:
+			return float(old_value or 0) != float(new_value or 0)
+		except (TypeError, ValueError):
+			return str(old_value or "") != str(new_value or "")
+	if fieldname == "due_date":
+		return str(old_value or "") != str(new_value or "")
+	return (old_value or "") != (new_value or "")

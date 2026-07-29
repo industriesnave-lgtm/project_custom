@@ -7,7 +7,12 @@ from project_custom.nave_task_recurrence import (
 	normalize_support_required,
 	validate_recurrence_config,
 )
-from project_custom.nave_task_utils import compute_is_overdue
+from project_custom.nave_task_utils import (
+	TRACKED_FIELD_LABELS,
+	compute_is_overdue,
+	format_field_change_message,
+	values_differ,
+)
 
 
 class NAVETask(Document):
@@ -25,6 +30,9 @@ class NAVETask(Document):
 		self.set_overdue_status()
 		self.validate_recurrence()
 		self.normalize_support_required_value()
+
+	def on_update(self):
+		self.log_tracked_field_changes()
 
 	def ensure_recurrence_defaults(self):
 		if self.is_recurring is None:
@@ -120,6 +128,75 @@ class NAVETask(Document):
 			self.status,
 			nowdate(),
 		)
+
+	def log_tracked_field_changes(self):
+		"""
+		Create exactly one System timeline entry per changed tracked field.
+		Skipped when APIs set flags.skip_field_change_log or during migrate.
+		"""
+		if self.flags.get("skip_field_change_log"):
+			return
+		if frappe.flags.in_migrate or frappe.flags.in_install or frappe.flags.in_patch:
+			return
+		if self.is_new():
+			return
+
+		before = self.get_doc_before_save()
+		if not before:
+			return
+
+		logged = set(self.flags.get("logged_field_changes") or [])
+
+		for fieldname in TRACKED_FIELD_LABELS:
+			if fieldname in logged:
+				continue
+			old_value = before.get(fieldname)
+			new_value = self.get(fieldname)
+			if not values_differ(old_value, new_value, fieldname=fieldname):
+				continue
+
+			self._insert_system_field_change(fieldname, old_value, new_value)
+			logged.add(fieldname)
+
+		self.flags.logged_field_changes = logged
+
+	def _insert_system_field_change(self, fieldname, old_value, new_value):
+		from frappe.utils import time_diff_in_seconds
+
+		# Avoid duplicates if an identical System row was just written in this request.
+		message = format_field_change_message(fieldname, old_value, new_value)
+		recent = frappe.db.exists(
+			"NAVE Task Update",
+			{
+				"task": self.name,
+				"update_type": "System",
+				"update_text": message,
+				"update_by": frappe.session.user,
+			},
+		)
+		if recent:
+			created = frappe.db.get_value("NAVE Task Update", recent, "creation")
+			if created and time_diff_in_seconds(now_datetime(), created) < 60:
+				return
+
+		employee = frappe.db.get_value(
+			"Employee",
+			{"user_id": frappe.session.user, "status": "Active"},
+			"name",
+		)
+		frappe.get_doc(
+			{
+				"doctype": "NAVE Task Update",
+				"task": self.name,
+				"update_by": frappe.session.user,
+				"employee": employee,
+				"updated_on": now_datetime(),
+				"update_type": "System",
+				"status": self.status,
+				"progress": flt(self.progress),
+				"update_text": message,
+			}
+		).insert(ignore_permissions=True)
 
 	def after_insert(self):
 		self.create_assignment_todo()
