@@ -10,6 +10,7 @@
     "update_by",
     "employee",
     "updated_on",
+    "update_type",
     "status",
     "progress",
     "update_text",
@@ -49,11 +50,20 @@
       "read_only": 1
     },
     {
+      "default": "Progress Update",
+      "fieldname": "update_type",
+      "fieldtype": "Select",
+      "in_list_view": 1,
+      "in_standard_filter": 1,
+      "label": "Update Type",
+      "options": "Progress Update\nReply\nReassignment\nStatus Change\nClose\nSystem"
+    },
+    {
       "fieldname": "status",
       "fieldtype": "Select",
       "in_list_view": 1,
       "label": "Status",
-      "options": "Open\nWorking\nPending\nCompleted",
+      "options": "Open\nWorking\nPending\nCompleted\nClosed\nCancelled",
       "reqd": 1
     },
     {

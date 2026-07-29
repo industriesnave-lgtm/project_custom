@@ -76,7 +76,7 @@
       "in_list_view": 1,
       "in_standard_filter": 1,
       "label": "Status",
-      "options": "Open\nWorking\nPending\nCompleted\nCancelled",
+      "options": "Open\nWorking\nPending\nCompleted\nClosed\nCancelled",
       "reqd": 1
     },
     {

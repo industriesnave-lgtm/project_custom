@@ -169,12 +169,15 @@ add_to_apps_screen = [
 # Scheduled Tasks
 # ---------------
 
-# scheduler_events = {
+scheduler_events = {
+	"daily": [
+		"project_custom.api.nave_task.refresh_overdue_flags",
+	],
+}
+
+# scheduler_events examples:
 # 	"all": [
 # 		"project_custom.tasks.all"
-# 	],
-# 	"daily": [
-# 		"project_custom.tasks.daily"
 # 	],
 # 	"hourly": [
 # 		"project_custom.tasks.hourly"
@@ -185,7 +188,6 @@ add_to_apps_screen = [
 # 	"monthly": [
 # 		"project_custom.tasks.monthly"
 # 	],
-# }
 
 # Testing
 # -------

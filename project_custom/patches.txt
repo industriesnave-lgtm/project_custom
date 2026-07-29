@@ -7,3 +7,4 @@ project_custom.patches.v1_3.create_nave_task_manager_role
 project_custom.patches.v1_0.add_journal_entry_cost_field
 project_custom.patches.v1_1.ensure_project_cost_summary
 project_custom.patches.v1_2.create_nave_sales_dashboard_page
+project_custom.patches.v1_4.backfill_nave_task_update_type
