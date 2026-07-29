@@ -38,6 +38,7 @@ frappe.pages["nave-tasks"].on_page_load = function (wrapper) {
 			task_updates: "project_custom.api.nave_task.get_task_updates_list",
 			dashboard: "project_custom.api.nave_task.get_dashboard_counts",
 			timeline: "project_custom.api.nave_task.get_task_timeline",
+			recurring_tasks: "project_custom.api.nave_task.get_recurring_tasks",
 		},
 		NAV: [
 			{ id: "dashboard", label: "Dashboard" },
@@ -577,13 +578,210 @@ frappe.pages["nave-tasks"].on_page_load = function (wrapper) {
 		bind_task_actions();
 	};
 
-	const render_recurring_placeholder = () => {
+	const render_recurring_list = () => {
+		if (!APP.state.items.length && !APP.state.loading) {
+			APP.$view.html(`
+				<div class="nt-empty">No recurring task templates found.</div>
+			`);
+			return;
+		}
+
+		const cards = APP.state.items
+			.map((task) => {
+				const active = as_int(task.recurrence_active);
+				const manage = can_manage_task(task);
+				const buttons = [
+					`<button class="btn btn-default btn-sm nt-rec-act" data-act="open" data-task="${escape(
+						task.name
+					)}">Open Template</button>`,
+					`<button class="btn btn-default btn-sm nt-rec-act" data-act="generated" data-task="${escape(
+						task.name
+					)}">View Generated Tasks</button>`,
+				];
+				if (manage) {
+					if (active) {
+						buttons.push(
+							`<button class="btn btn-default btn-sm nt-rec-act" data-act="disable" data-task="${escape(
+								task.name
+							)}">Disable</button>`
+						);
+						buttons.push(
+							`<button class="btn btn-primary btn-sm nt-rec-act" data-act="generate" data-task="${escape(
+								task.name
+							)}">Generate Now</button>`
+						);
+					} else {
+						buttons.push(
+							`<button class="btn btn-primary btn-sm nt-rec-act" data-act="enable" data-task="${escape(
+								task.name
+							)}">Enable</button>`
+						);
+					}
+				}
+				return `
+				<article class="nt-task-card ${active ? "" : "closed"}">
+					<h3 class="nt-task-title">${escape(task.subject)}</h3>
+					<div class="nt-badges">
+						<span class="nt-badge">${escape(task.recurrence_frequency || "-")}</span>
+						<span class="nt-badge ${active ? "status-Working" : "status-Closed"}">
+							${active ? "Active" : "Disabled"}
+						</span>
+					</div>
+					<div class="nt-meta">
+						<div><b>Template:</b> ${escape(task.name)}</div>
+						<div><b>Assignee:</b> ${escape(task.assigned_to || "-")}</div>
+						<div><b>Project:</b> ${escape(task.project || "-")}</div>
+						<div><b>Start:</b> ${escape(task.recurrence_start_date || "-")}</div>
+						<div><b>End:</b> ${escape(task.recurrence_end_date || "-")}</div>
+						<div><b>Last generated:</b> ${escape(task.last_generated_date || "-")}</div>
+						<div><b>Next creation:</b> ${escape(task.next_creation_date || "-")}</div>
+						<div><b>Due after days:</b> ${escape(task.recurrence_due_after_days ?? 0)}</div>
+					</div>
+					<div class="nt-actions">${buttons.join("")}</div>
+				</article>`;
+			})
+			.join("");
+
 		APP.$view.html(`
-			<div class="nt-empty">
-				<strong>Recurring Tasks</strong>
-				<p style="margin:8px 0 0;">Not configured yet. Recurrence setup arrives in Phase 3.</p>
-			</div>
+			<div class="nt-task-grid">${cards}</div>
+			<div class="nt-load-more-wrap" style="text-align:center;margin-top:14px;"></div>
 		`);
+
+		const loaded = APP.state.items.length;
+		const more = loaded < APP.state.total;
+		const $wrap = APP.$view.find(".nt-load-more-wrap");
+		$wrap.html(
+			more
+				? `<button class="btn btn-default nt-load-more">Load More (${loaded} / ${APP.state.total})</button>`
+				: `<div class="nt-empty" style="padding:12px;">Showing ${loaded} template(s).</div>`
+		);
+		$wrap.find(".nt-load-more").on("click", () => {
+			APP.state.page_no += 1;
+			load_recurring_view(true);
+		});
+
+		APP.$view.find(".nt-rec-act").on("click", function () {
+			const act = $(this).data("act");
+			const name = $(this).data("task");
+			if (act === "open") open_task_detail(name);
+			if (act === "generated") open_generated_tasks(name);
+			if (act === "enable") {
+				frappe.call({
+					method: "project_custom.api.nave_task.enable_recurring_task",
+					args: { task_name: name },
+					freeze: true,
+					callback(r) {
+						if (r.message?.ok) {
+							frappe.show_alert({ message: "Recurrence enabled", indicator: "green" });
+							load_current(true);
+						}
+					},
+				});
+			}
+			if (act === "disable") {
+				frappe.confirm("Disable recurrence for this template?", () => {
+					frappe.call({
+						method: "project_custom.api.nave_task.disable_recurring_task",
+						args: { task_name: name },
+						freeze: true,
+						callback(r) {
+							if (r.message?.ok) {
+								frappe.show_alert({
+									message: "Recurrence disabled",
+									indicator: "green",
+								});
+								load_current(true);
+							}
+						},
+					});
+				});
+			}
+			if (act === "generate") {
+				frappe.call({
+					method: "project_custom.api.nave_task.generate_recurring_task_now",
+					args: { task_name: name },
+					freeze: true,
+					freeze_message: "Generating task…",
+					callback(r) {
+						if (r.message?.ok) {
+							frappe.show_alert({
+								message: "Generate Now completed",
+								indicator: "green",
+							});
+							load_current(true);
+						}
+					},
+				});
+			}
+		});
+	};
+
+	const open_generated_tasks = async (template_name) => {
+		const dialog = new frappe.ui.Dialog({
+			title: `Generated Tasks · ${template_name}`,
+			size: "large",
+			fields: [{ fieldtype: "HTML", fieldname: "body" }],
+		});
+		dialog.show();
+		dialog.fields_dict.body.$wrapper.html(
+			`<div class="nt-loading"><span class="nt-spinner"></span> Loading…</div>`
+		);
+		try {
+			const result = await call("project_custom.api.nave_task.get_generated_tasks", {
+				template_name,
+				page: 1,
+				page_length: 50,
+			});
+			const rows = result?.data || [];
+			if (!rows.length) {
+				dialog.fields_dict.body.$wrapper.html(
+					`<div class="nt-empty">No generated tasks yet.</div>`
+				);
+				return;
+			}
+			dialog.fields_dict.body.$wrapper.html(`
+				<div class="nt-update-list">
+					${rows
+						.map(
+							(row) => `
+						<div class="nt-update-row">
+							<div><b>${escape(row.subject)}</b></div>
+							<div>ID: ${escape(row.name)}</div>
+							<div>Occurrence: ${escape(row.recurrence_occurrence_date || "-")}</div>
+							<div>Due: ${escape(row.due_date || "-")} · Status: ${escape(row.status || "-")}</div>
+							<button class="btn btn-default btn-sm nt-open-gen" data-task="${escape(
+								row.name
+							)}" style="margin-top:8px;">Open Task</button>
+						</div>`
+						)
+						.join("")}
+				</div>
+			`);
+			dialog.fields_dict.body.$wrapper.find(".nt-open-gen").on("click", function () {
+				dialog.hide();
+				open_task_detail($(this).data("task"));
+			});
+		} catch (e) {
+			dialog.fields_dict.body.$wrapper.html(
+				`<div class="nt-error">Unable to load generated tasks.</div>`
+			);
+		}
+	};
+
+	const load_recurring_view = async (append = false) => {
+		if (!append) set_loading("Loading recurring templates…");
+		try {
+			const result = await call(APP.VIEW_API.recurring_tasks, {
+				page: APP.state.page_no,
+				page_length: APP.state.page_length,
+			});
+			const rows = result?.data || [];
+			APP.state.total = result?.total || 0;
+			APP.state.items = append ? APP.state.items.concat(rows) : rows;
+			render_recurring_list();
+		} catch (e) {
+			set_error("Unable to load recurring tasks.");
+		}
 	};
 
 	const timeline_html = (items) => {
@@ -988,7 +1186,7 @@ frappe.pages["nave-tasks"].on_page_load = function (wrapper) {
 		}
 		update_nav();
 		if (APP.state.view === "dashboard") return load_dashboard();
-		if (APP.state.view === "recurring_tasks") return render_recurring_placeholder();
+		if (APP.state.view === "recurring_tasks") return load_recurring_view(false);
 		if (APP.state.view === "task_updates") return load_updates_view(false);
 		return load_task_view(false);
 	};
@@ -1003,7 +1201,7 @@ frappe.pages["nave-tasks"].on_page_load = function (wrapper) {
 			created_by_me: "Tasks you created.",
 			all_tasks: "All tasks you are permitted to see.",
 			overdue_tasks: "Past-due active tasks in your scope.",
-			recurring_tasks: "Recurrence configuration comes in Phase 3.",
+			recurring_tasks: "Recurring templates and generated instances.",
 			task_updates: "Permanent progress and discussion history.",
 		};
 		page.main.find(".nt-subtitle").text(subtitle[view] || "");

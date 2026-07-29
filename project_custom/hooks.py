@@ -171,7 +171,7 @@ add_to_apps_screen = [
 
 scheduler_events = {
 	"daily": [
-		"project_custom.api.nave_task.refresh_overdue_flags",
+		"project_custom.api.nave_task.run_daily_nave_task_jobs",
 	],
 }
 

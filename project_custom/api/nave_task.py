@@ -9,6 +9,7 @@ from project_custom.nave_task_utils import (
 	user_can_manage_task,
 	user_can_submit_progress_update,
 )
+from project_custom.nave_task_recurrence import normalize_support_required
 from project_custom.permissions.nave_task import MANAGER_ROLE
 
 
@@ -31,6 +32,18 @@ TASK_LIST_FIELDS = [
 	"start_date",
 	"due_date",
 	"is_overdue",
+	"is_recurring",
+	"recurrence_active",
+	"recurrence_frequency",
+	"recurrence_start_date",
+	"recurrence_end_date",
+	"next_creation_date",
+	"last_generated_date",
+	"recurrence_due_after_days",
+	"recurring_template",
+	"generated_from",
+	"recurrence_sequence",
+	"recurrence_occurrence_date",
 	"latest_update",
 	"pending_reason",
 	"support_required",
@@ -590,6 +603,11 @@ def submit_update(
 		frappe.throw("Pending Reason is required.")
 
 	previous_status = task.status
+	normalized_support = (
+		normalize_support_required(support_required)
+		if support_required is not None
+		else None
+	)
 	update = _create_history_entry(
 		task,
 		update_type="Progress Update",
@@ -597,8 +615,8 @@ def submit_update(
 		status=status,
 		progress=progress,
 		pending_reason=pending_reason,
-		support_required=support_required
-		if support_required is not None
+		support_required=normalized_support
+		if normalized_support is not None
 		else task.support_required,
 		attachment=attachment,
 	)
@@ -616,8 +634,8 @@ def submit_update(
 		compute_is_overdue(task.due_date, status, nowdate()),
 		update_modified=False,
 	)
-	if support_required is not None:
-		task.db_set("support_required", support_required, update_modified=True)
+	if normalized_support is not None:
+		task.db_set("support_required", normalized_support, update_modified=True)
 	else:
 		task.db_set("latest_update", update_text.strip(), update_modified=True)
 
@@ -804,6 +822,192 @@ def refresh_overdue_flags():
 			updated += 1
 
 	return {"ok": True, "updated": updated, "checked": len(tasks)}
+
+
+def run_daily_nave_task_jobs():
+	"""Combined daily job: overdue refresh + recurring generation."""
+	overdue = refresh_overdue_flags()
+	from project_custom.nave_task_generation import generate_due_recurring_tasks
+
+	recurrence = generate_due_recurring_tasks()
+	return {"ok": True, "overdue": overdue, "recurrence": recurrence}
+
+
+RECURRING_LIST_FIELDS = [
+	"name",
+	"subject",
+	"assigned_to",
+	"assigned_employee",
+	"assigned_by",
+	"owner",
+	"project",
+	"department",
+	"priority",
+	"status",
+	"is_recurring",
+	"recurrence_active",
+	"recurrence_frequency",
+	"recurrence_start_date",
+	"recurrence_end_date",
+	"next_creation_date",
+	"last_generated_date",
+	"recurrence_due_after_days",
+	"modified",
+]
+
+
+@frappe.whitelist()
+def get_recurring_tasks(
+	page=1,
+	page_length=20,
+	frequency=None,
+	active=None,
+	project=None,
+	search=None,
+):
+	"""List recurring templates visible to the current user."""
+	require_login()
+	page, page_length, start = _parse_page(page, page_length)
+	filters = [["is_recurring", "=", 1]]
+	if frequency:
+		filters.append(["recurrence_frequency", "=", frequency])
+	if active in (0, 1, "0", "1"):
+		filters.append(["recurrence_active", "=", cint(active)])
+	if project:
+		filters.append(["project", "=", project])
+	if search:
+		filters.append(["subject", "like", f"%{search.strip()}%"])
+
+	rows = frappe.get_list(
+		"NAVE Task",
+		filters=filters,
+		fields=RECURRING_LIST_FIELDS,
+		order_by="next_creation_date asc, modified desc",
+		limit_start=start,
+		limit_page_length=page_length,
+		ignore_permissions=False,
+	)
+	total = _permission_aware_count("NAVE Task", filters)
+	return {
+		"page": page,
+		"page_length": page_length,
+		"total": total,
+		"data": rows,
+	}
+
+
+@frappe.whitelist()
+def get_generated_tasks(template_name, page=1, page_length=20):
+	require_login()
+	template = get_task_for_user(template_name)
+	page, page_length, start = _parse_page(page, page_length)
+	filters = {"generated_from": template.name}
+	rows = frappe.get_list(
+		"NAVE Task",
+		filters=filters,
+		fields=TASK_LIST_FIELDS,
+		order_by="recurrence_occurrence_date desc, creation desc",
+		limit_start=start,
+		limit_page_length=page_length,
+		ignore_permissions=False,
+	)
+	total = _permission_aware_count("NAVE Task", filters)
+	return {
+		"page": page,
+		"page_length": page_length,
+		"total": total,
+		"template": template.name,
+		"data": [serialize_task(row) for row in rows],
+	}
+
+
+@frappe.whitelist()
+def enable_recurring_task(task_name):
+	require_login()
+	user = frappe.session.user
+	task = get_task_for_user(task_name, user)
+	if not can_manage_task_doc(task, user):
+		frappe.throw(
+			"Only the task creator or an authorized manager can enable recurrence.",
+			frappe.PermissionError,
+		)
+	if not cint(task.is_recurring):
+		frappe.throw("This task is not a recurring template.")
+	if task.status in ("Closed", "Cancelled"):
+		frappe.throw("Closed or Cancelled templates cannot be enabled.")
+
+	task.db_set("recurrence_active", 1, update_modified=True)
+	from project_custom.nave_task_generation import _create_recurrence_history
+
+	_create_recurrence_history(task.name, "Recurrence enabled.", status=task.status, progress=task.progress)
+	return {"ok": True, "task": task.name, "recurrence_active": 1}
+
+
+@frappe.whitelist()
+def disable_recurring_task(task_name):
+	require_login()
+	user = frappe.session.user
+	task = get_task_for_user(task_name, user)
+	if not can_manage_task_doc(task, user):
+		frappe.throw(
+			"Only the task creator or an authorized manager can disable recurrence.",
+			frappe.PermissionError,
+		)
+	if not cint(task.is_recurring):
+		frappe.throw("This task is not a recurring template.")
+
+	task.db_set("recurrence_active", 0, update_modified=True)
+	from project_custom.nave_task_generation import _create_recurrence_history
+
+	_create_recurrence_history(
+		task.name,
+		"Recurrence disabled. Previously generated tasks were preserved.",
+		status=task.status,
+		progress=task.progress,
+	)
+	return {"ok": True, "task": task.name, "recurrence_active": 0}
+
+
+@frappe.whitelist()
+def generate_recurring_task_now(task_name, occurrence_date=None):
+	"""
+	Manual Generate Now.
+	Uses duplicate-prevention; defaults to next_creation_date or today.
+	"""
+	require_login()
+	user = frappe.session.user
+	task = get_task_for_user(task_name, user)
+	if not can_manage_task_doc(task, user):
+		frappe.throw(
+			"Only the task creator or an authorized manager can generate recurring tasks.",
+			frappe.PermissionError,
+		)
+	if not cint(task.is_recurring):
+		frappe.throw("This task is not a recurring template.")
+	if not cint(task.recurrence_active):
+		frappe.throw("Recurrence is disabled for this template.")
+	if task.status in ("Closed", "Cancelled"):
+		frappe.throw("Closed or Cancelled templates cannot generate tasks.")
+
+	from project_custom.nave_task_generation import (
+		_create_recurrence_history,
+		process_template,
+	)
+	from project_custom.nave_task_recurrence import _as_date
+
+	occurrence = _as_date(occurrence_date) or _as_date(task.next_creation_date) or _as_date(nowdate())
+	_create_recurrence_history(
+		task.name,
+		f"Manual Generate Now requested for {occurrence.isoformat()}.",
+		status=task.status,
+		progress=task.progress,
+	)
+	result = process_template(
+		task.name,
+		force_occurrence=occurrence,
+		source="manual",
+	)
+	return {"ok": True, "task": task.name, "result": result}
 
 
 # Backwards-compatible alias used by the existing page.

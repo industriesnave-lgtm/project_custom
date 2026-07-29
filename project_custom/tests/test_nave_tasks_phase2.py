@@ -47,7 +47,10 @@ class TestViewApiMapping(unittest.TestCase):
 			VIEW_API_MAP["dashboard"],
 			"project_custom.api.nave_task.get_dashboard_counts",
 		)
-		self.assertIsNone(VIEW_API_MAP["recurring_tasks"])
+		self.assertEqual(
+			VIEW_API_MAP["recurring_tasks"],
+			"project_custom.api.nave_task.get_recurring_tasks",
+		)
 
 	def test_dashboard_counter_navigation_targets(self):
 		self.assertEqual(DASHBOARD_COUNTER_VIEWS["overdue"]["view"], "overdue_tasks")
@@ -153,7 +156,8 @@ class TestBrandingAndAssets(unittest.TestCase):
 		self.assertIn("nt-empty", js)
 		self.assertIn("nt-error", js)
 		self.assertIn("Load More", js)
-		self.assertIn("Not configured yet", js)
+		self.assertIn("get_recurring_tasks", js)
+		self.assertNotIn("Not configured yet", js)
 		self.assertIn("frappe.utils.escape_html", js)
 		self.assertIn("get_dashboard_counts", js)
 		self.assertIn("get_task_timeline", js)

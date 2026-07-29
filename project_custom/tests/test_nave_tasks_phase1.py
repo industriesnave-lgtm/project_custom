@@ -511,7 +511,7 @@ class TestSchedulerRegistration(unittest.TestCase):
 		text = hooks_path.read_text()
 		self.assertIn("scheduler_events", text)
 		self.assertIn(
-			"project_custom.api.nave_task.refresh_overdue_flags",
+			"project_custom.api.nave_task.run_daily_nave_task_jobs",
 			text,
 		)
 

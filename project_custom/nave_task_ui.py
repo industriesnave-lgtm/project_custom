@@ -15,7 +15,7 @@ VIEW_API_MAP = {
 	"all_tasks": "project_custom.api.nave_task.get_all_tasks",
 	"overdue_tasks": "project_custom.api.nave_task.get_overdue_tasks",
 	"task_updates": "project_custom.api.nave_task.get_task_updates_list",
-	"recurring_tasks": None,
+	"recurring_tasks": "project_custom.api.nave_task.get_recurring_tasks",
 	"timeline": "project_custom.api.nave_task.get_task_timeline",
 }
 

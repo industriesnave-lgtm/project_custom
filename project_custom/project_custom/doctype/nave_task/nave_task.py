@@ -2,13 +2,20 @@ import frappe
 from frappe.model.document import Document
 from frappe.utils import flt, getdate, now_datetime, nowdate
 
+from project_custom.nave_task_recurrence import (
+	initial_next_creation_date,
+	normalize_support_required,
+	validate_recurrence_config,
+)
 from project_custom.nave_task_utils import compute_is_overdue
 
 
 class NAVETask(Document):
 	def before_insert(self):
-		self.assigned_by = frappe.session.user
+		if not self.assigned_by:
+			self.assigned_by = frappe.session.user
 		self.set_employee_details()
+		self.ensure_recurrence_defaults()
 
 	def validate(self):
 		self.validate_dates()
@@ -16,6 +23,44 @@ class NAVETask(Document):
 		self.set_employee_details()
 		self.set_completion_details()
 		self.set_overdue_status()
+		self.validate_recurrence()
+		self.normalize_support_required_value()
+
+	def ensure_recurrence_defaults(self):
+		if self.is_recurring is None:
+			self.is_recurring = 0
+		if not self.is_recurring:
+			return
+		if self.recurrence_active is None:
+			self.recurrence_active = 1
+		if self.recurrence_due_after_days is None:
+			self.recurrence_due_after_days = 0
+
+	def normalize_support_required_value(self):
+		# Keep Small Text storage; normalize Check-like values safely.
+		self.support_required = normalize_support_required(self.support_required)
+
+	def validate_recurrence(self):
+		# Generated instances must never act as templates.
+		if self.generated_from:
+			self.is_recurring = 0
+			self.recurrence_active = 0
+
+		errors = validate_recurrence_config(self.as_dict())
+		if errors:
+			frappe.throw(errors[0])
+
+		if self.is_recurring:
+			if not self.next_creation_date:
+				self.next_creation_date = initial_next_creation_date(
+					self.as_dict(),
+					getdate(nowdate()),
+				)
+			if self.recurrence_active is None:
+				self.recurrence_active = 1
+		else:
+			# Leave historical recurrence metadata intact on disabled templates.
+			pass
 
 	def set_employee_details(self):
 		if not self.assigned_to:
