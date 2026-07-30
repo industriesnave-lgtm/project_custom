@@ -30,7 +30,12 @@ SUPPORTED_FILTER_KEYS = (
 	"to_date",
 	"due_date_from",
 	"due_date_to",
+	"completed_from",
+	"completed_to",
+	"completion_result",
 )
+
+COMPLETION_RESULT_VALUES = ("On Time", "Late", "No Due Date")
 
 DEFAULT_TASK_FIELDS = (
 	"name",
@@ -132,10 +137,21 @@ def normalize_filters(raw=None) -> dict:
 	if priorities:
 		out["priority"] = priorities if len(priorities) > 1 else priorities[0]
 
-	for key in ("from_date", "to_date", "due_date_from", "due_date_to"):
+	for key in (
+		"from_date",
+		"to_date",
+		"due_date_from",
+		"due_date_to",
+		"completed_from",
+		"completed_to",
+	):
 		parsed = _as_date(raw.get(key))
 		if parsed:
 			out[key] = parsed.isoformat()
+
+	completion_result = _clean_str(raw.get("completion_result"))
+	if completion_result in COMPLETION_RESULT_VALUES:
+		out["completion_result"] = completion_result
 
 	# Drop inverted ranges rather than throwing (callers may validate later).
 	from_date = _as_date(out.get("from_date"))
@@ -149,6 +165,12 @@ def normalize_filters(raw=None) -> dict:
 	if due_from and due_to and due_from > due_to:
 		out.pop("due_date_from", None)
 		out.pop("due_date_to", None)
+
+	completed_from = _as_date(out.get("completed_from"))
+	completed_to = _as_date(out.get("completed_to"))
+	if completed_from and completed_to and completed_from > completed_to:
+		out.pop("completed_from", None)
+		out.pop("completed_to", None)
 
 	return out
 
@@ -211,6 +233,11 @@ def build_frappe_filters(normalized: dict | None) -> tuple[list, list]:
 		filters.append(["due_date", ">=", normalized["due_date_from"]])
 	if normalized.get("due_date_to"):
 		filters.append(["due_date", "<=", normalized["due_date_to"]])
+
+	if normalized.get("completed_from"):
+		filters.append(["completed_on", ">=", f"{normalized['completed_from']} 00:00:00"])
+	if normalized.get("completed_to"):
+		filters.append(["completed_on", "<=", f"{normalized['completed_to']} 23:59:59"])
 
 	created_by = normalized.get("created_by")
 	if created_by:

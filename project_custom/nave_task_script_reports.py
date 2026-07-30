@@ -6,6 +6,7 @@ come from nave_task_reporting.py — not duplicated per report.
 
 from __future__ import annotations
 
+import re
 from datetime import date, timedelta
 
 import frappe
@@ -17,10 +18,16 @@ from project_custom.nave_task_reporting import (
 	get_task_rows,
 	normalize_filters,
 )
-from project_custom.nave_task_utils import is_terminal_status
+from project_custom.nave_task_utils import (
+	ACTIVE_STATUSES,
+	DIRECTOR_ROLE,
+	MANAGER_ROLE,
+	SYSTEM_MANAGER_ROLE,
+	is_manager_level_user,
+	is_reopen_transition,
+	is_terminal_status,
+)
 
-
-ACTIVE_STATUSES = ("Open", "Working", "Pending")
 
 OVERDUE_AGING_BUCKETS = (
 	"1-3 Days",
@@ -123,11 +130,20 @@ def _created_by_display(row) -> str:
 	return _row_get(row, "assigned_by") or _row_get(row, "owner") or ""
 
 
-def _summary_items(pairs: list[tuple[str, int]]) -> list[dict]:
-	return [
-		{"label": label, "value": int(value or 0), "datatype": "Int"}
-		for label, value in pairs
-	]
+def _summary_items(pairs: list) -> list[dict]:
+	"""Build Script Report summary cards. Pair is (label, value) or (label, value, datatype)."""
+	items = []
+	for pair in pairs:
+		if len(pair) == 3:
+			label, value, datatype = pair
+		else:
+			label, value = pair
+			datatype = "Int"
+		if datatype in ("Float", "Percent"):
+			items.append({"label": label, "value": float(value or 0), "datatype": datatype})
+		else:
+			items.append({"label": label, "value": int(value or 0), "datatype": "Int"})
+	return items
 
 
 def _base_columns_task_id_title():
@@ -800,3 +816,504 @@ def execute_project_task_report(filters=None, *, user=None, today=None):
 		]
 	)
 	return project_task_columns(), data, None, None, report_summary
+
+
+# ---------------------------------------------------------------------------
+# Employee Performance & Completed Tasks (Batch 7C Part 2)
+# ---------------------------------------------------------------------------
+
+PERFORMANCE_FIELDS = REPORT_FIELDS + (
+	"completed_on",
+	"completion_remarks",
+	"completion_attachment",
+)
+
+COMPLETED_REPORT_FIELDS = PERFORMANCE_FIELDS
+
+COMPLETED_ONLY_STATUSES = ("Completed", "Closed")
+
+_STATUS_CHANGE_RE = re.compile(
+	r"^Status changed from (.+?) to (.+?)\.?$",
+	re.IGNORECASE,
+)
+
+
+def _user_is_manager_level(user: str) -> bool:
+	roles = frappe.get_roles(user) or []
+	return is_manager_level_user(
+		is_admin=(user == "Administrator" or SYSTEM_MANAGER_ROLE in roles),
+		is_director=DIRECTOR_ROLE in roles,
+		is_manager=MANAGER_ROLE in roles,
+	)
+
+
+def completion_days(creation, completed_on) -> int | None:
+	"""Days from creation date to completed_on date; None if either missing."""
+	created = _as_date(creation)
+	done = _as_date(completed_on)
+	if not created or not done:
+		return None
+	return max((done - created).days, 0)
+
+
+def delay_days(completed_on_or_today, due_date) -> int | None:
+	"""max(end_date - due_date, 0); None when due_date missing."""
+	due = _as_date(due_date)
+	end = _as_date(completed_on_or_today)
+	if not due or not end:
+		return None
+	return max((end - due).days, 0)
+
+
+def classify_completion_result(completed_on, due_date) -> str:
+	due = _as_date(due_date)
+	done = _as_date(completed_on)
+	if not due:
+		return "No Due Date"
+	if not done:
+		return "No Due Date"
+	if done <= due:
+		return "On Time"
+	return "Late"
+
+
+def parse_status_change_text(update_text: str | None) -> tuple[str | None, str | None]:
+	match = _STATUS_CHANGE_RE.match((update_text or "").strip())
+	if not match:
+		return None, None
+	old_status = match.group(1).strip()
+	new_status = match.group(2).strip()
+	if old_status in ("—", "-", ""):
+		old_status = None
+	if new_status in ("—", "-", ""):
+		new_status = None
+	return old_status, new_status
+
+
+def get_reopen_counts_by_task(task_names: list[str]) -> dict[str, int]:
+	"""
+	Count reopen transitions from NAVE Task Update Status Change history.
+
+	Uses one bulk query. If history cannot be loaded, returns {} (callers treat
+	missing keys as 0 — documented fallback, no schema changes).
+	"""
+	names = [n for n in (task_names or []) if n]
+	if not names:
+		return {}
+	try:
+		rows = frappe.get_all(
+			"NAVE Task Update",
+			filters={
+				"task": ["in", names],
+				"update_type": "Status Change",
+			},
+			fields=["task", "update_text"],
+			limit_page_length=50000,
+		)
+	except Exception:
+		return {}
+
+	counts: dict[str, int] = {}
+	for row in rows or []:
+		task = _row_get(row, "task")
+		old_status, new_status = parse_status_change_text(_row_get(row, "update_text"))
+		if not task or not is_reopen_transition(old_status, new_status):
+			continue
+		counts[task] = counts.get(task, 0) + 1
+	return counts
+
+
+def _empty_employee_stats():
+	return {
+		"total": 0,
+		"completed": 0,
+		"closed": 0,
+		"active": 0,
+		"pending": 0,
+		"overdue": 0,
+		"reopened": 0,
+		"on_time": 0,
+		"late": 0,
+		"completion_days_sum": 0,
+		"completion_days_n": 0,
+		"delay_days_sum": 0,
+		"delay_days_n": 0,
+		"last_activity": None,
+		"_task_names": [],
+	}
+
+
+def _bump_employee_stats(stats: dict, row, today: date) -> None:
+	status = (_row_get(row, "status") or "").strip()
+	due_date = _row_get(row, "due_date")
+	completed_on = _row_get(row, "completed_on")
+	is_overdue_flag = _row_get(row, "is_overdue")
+	modified = _row_get(row, "modified")
+	name = _row_get(row, "name")
+
+	stats["total"] += 1
+	if name:
+		stats["_task_names"].append(name)
+
+	if status == "Completed":
+		stats["completed"] += 1
+	elif status == "Closed":
+		stats["closed"] += 1
+	elif status in ACTIVE_STATUSES:
+		stats["active"] += 1
+		if status == "Pending":
+			stats["pending"] += 1
+
+	if status in ACTIVE_STATUSES:
+		overdue = False
+		if is_overdue_flag is not None and is_overdue_flag != "":
+			overdue = int(is_overdue_flag or 0) == 1
+		else:
+			overdue = days_overdue(due_date, status, today) > 0
+		if overdue:
+			stats["overdue"] += 1
+			d = delay_days(today, due_date)
+			if d is not None:
+				stats["delay_days_sum"] += d
+				stats["delay_days_n"] += 1
+
+	if status in COMPLETED_ONLY_STATUSES:
+		result = classify_completion_result(completed_on, due_date)
+		if result == "On Time":
+			stats["on_time"] += 1
+		elif result == "Late":
+			stats["late"] += 1
+		cd = completion_days(_row_get(row, "creation"), completed_on)
+		if cd is not None:
+			stats["completion_days_sum"] += cd
+			stats["completion_days_n"] += 1
+		d = delay_days(completed_on, due_date)
+		if d is not None:
+			stats["delay_days_sum"] += d
+			stats["delay_days_n"] += 1
+
+	if modified:
+		prev = stats["last_activity"]
+		if not prev or str(modified) > str(prev):
+			stats["last_activity"] = modified
+
+
+def _avg(sum_value: float, count: int) -> float:
+	if not count:
+		return 0.0
+	return round(sum_value / count, 1)
+
+
+def employee_performance_columns():
+	return [
+		{
+			"label": "Employee / Assigned User",
+			"fieldname": "assigned_to",
+			"fieldtype": "Data",
+			"width": 180,
+		},
+		{"label": "Total Assigned", "fieldname": "total_assigned", "fieldtype": "Int", "width": 110},
+		{"label": "Completed", "fieldname": "completed", "fieldtype": "Int", "width": 100},
+		{"label": "Closed", "fieldname": "closed", "fieldtype": "Int", "width": 80},
+		{"label": "Active", "fieldname": "active", "fieldtype": "Int", "width": 80},
+		{"label": "Pending", "fieldname": "pending", "fieldtype": "Int", "width": 90},
+		{"label": "Overdue", "fieldname": "overdue", "fieldtype": "Int", "width": 90},
+		{"label": "Reopened", "fieldname": "reopened", "fieldtype": "Int", "width": 90},
+		{
+			"label": "Completion %",
+			"fieldname": "completion_pct",
+			"fieldtype": "Percent",
+			"width": 110,
+		},
+		{
+			"label": "On-Time Completed",
+			"fieldname": "on_time_completed",
+			"fieldtype": "Int",
+			"width": 130,
+		},
+		{
+			"label": "Late Completed",
+			"fieldname": "late_completed",
+			"fieldtype": "Int",
+			"width": 120,
+		},
+		{
+			"label": "Average Completion Days",
+			"fieldname": "avg_completion_days",
+			"fieldtype": "Float",
+			"width": 150,
+		},
+		{
+			"label": "Average Delay Days",
+			"fieldname": "avg_delay_days",
+			"fieldtype": "Float",
+			"width": 140,
+		},
+		{
+			"label": "Last Activity",
+			"fieldname": "last_activity",
+			"fieldtype": "Datetime",
+			"width": 150,
+		},
+	]
+
+
+def execute_employee_performance_report(filters=None, *, user=None, today=None):
+	user = user or frappe.session.user
+	day = _today(today)
+	raw = report_filters_dict(filters)
+	manager_level = _user_is_manager_level(user)
+	# Employees may only see their own performance row — ignore client override.
+	if not manager_level:
+		raw["assigned_to"] = user
+	normalized = normalize_filters(raw)
+	if not manager_level:
+		normalized["assigned_to"] = user
+
+	rows = get_task_rows(
+		normalized,
+		user=user,
+		fields=PERFORMANCE_FIELDS,
+		order_by="assigned_to asc, modified desc",
+	)
+
+	groups: dict[str, dict] = {}
+	for row in rows:
+		assignee = (_row_get(row, "assigned_to") or "").strip() or "Unassigned"
+		if assignee not in groups:
+			groups[assignee] = _empty_employee_stats()
+		_bump_employee_stats(groups[assignee], row, day)
+
+	all_task_names = []
+	for stats in groups.values():
+		all_task_names.extend(stats["_task_names"])
+	reopen_by_task = get_reopen_counts_by_task(all_task_names)
+
+	data = []
+	for assignee in sorted(groups.keys(), key=lambda x: (x == "Unassigned", x.lower())):
+		stats = groups[assignee]
+		reopened = sum(reopen_by_task.get(n, 0) for n in stats["_task_names"])
+		done = stats["completed"] + stats["closed"]
+		data.append(
+			{
+				"assigned_to": assignee,
+				"total_assigned": stats["total"],
+				"completed": stats["completed"],
+				"closed": stats["closed"],
+				"active": stats["active"],
+				"pending": stats["pending"],
+				"overdue": stats["overdue"],
+				"reopened": reopened,
+				"completion_pct": _completion_pct(done, stats["total"]),
+				"on_time_completed": stats["on_time"],
+				"late_completed": stats["late"],
+				"avg_completion_days": _avg(
+					stats["completion_days_sum"], stats["completion_days_n"]
+				),
+				"avg_delay_days": _avg(stats["delay_days_sum"], stats["delay_days_n"]),
+				"last_activity": stats["last_activity"],
+			}
+		)
+
+	total_assigned = sum(r["total_assigned"] for r in data)
+	total_done = sum(r["completed"] + r["closed"] for r in data)
+	total_active = sum(r["active"] for r in data)
+	total_overdue = sum(r["overdue"] for r in data)
+	report_summary = _summary_items(
+		[
+			("Employees", len(data)),
+			("Total Assigned", total_assigned),
+			("Completed/Closed", total_done),
+			("Active", total_active),
+			("Overdue", total_overdue),
+			(
+				"Overall Completion %",
+				_completion_pct(total_done, total_assigned),
+				"Percent",
+			),
+		]
+	)
+	return employee_performance_columns(), data, None, None, report_summary
+
+
+def completed_task_columns():
+	return [
+		{
+			"label": "Task ID",
+			"fieldname": "name",
+			"fieldtype": "Link",
+			"options": "NAVE Task",
+			"width": 140,
+		},
+		{"label": "Title", "fieldname": "subject", "fieldtype": "Data", "width": 220},
+		{
+			"label": "Assigned To",
+			"fieldname": "assigned_to",
+			"fieldtype": "Link",
+			"options": "User",
+			"width": 160,
+		},
+		{"label": "Status", "fieldname": "status", "fieldtype": "Data", "width": 100},
+		{"label": "Priority", "fieldname": "priority", "fieldtype": "Data", "width": 90},
+		{
+			"label": "Created On",
+			"fieldname": "creation",
+			"fieldtype": "Datetime",
+			"width": 150,
+		},
+		{"label": "Due Date", "fieldname": "due_date", "fieldtype": "Date", "width": 110},
+		{
+			"label": "Completed On",
+			"fieldname": "completed_on",
+			"fieldtype": "Datetime",
+			"width": 150,
+		},
+		{
+			"label": "Completion Days",
+			"fieldname": "completion_days",
+			"fieldtype": "Int",
+			"width": 120,
+		},
+		{"label": "Delay Days", "fieldname": "delay_days", "fieldtype": "Int", "width": 100},
+		{
+			"label": "Completion Result",
+			"fieldname": "completion_result",
+			"fieldtype": "Data",
+			"width": 120,
+		},
+		{
+			"label": "Completion Remarks",
+			"fieldname": "completion_remarks",
+			"fieldtype": "Data",
+			"width": 200,
+		},
+		{
+			"label": "Completion Attachment",
+			"fieldname": "completion_attachment",
+			"fieldtype": "Attach",
+			"width": 160,
+		},
+		{
+			"label": "Project",
+			"fieldname": "project",
+			"fieldtype": "Link",
+			"options": "Project",
+			"width": 140,
+		},
+		{
+			"label": "Department",
+			"fieldname": "department",
+			"fieldtype": "Link",
+			"options": "Department",
+			"width": 140,
+		},
+		{
+			"label": "Created By",
+			"fieldname": "created_by",
+			"fieldtype": "Link",
+			"options": "User",
+			"width": 160,
+		},
+		{
+			"label": "Last Modified",
+			"fieldname": "modified",
+			"fieldtype": "Datetime",
+			"width": 150,
+		},
+	]
+
+
+def _normalize_completed_report_filters(raw: dict) -> dict:
+	normalized = normalize_filters(raw)
+	allowed = set(COMPLETED_ONLY_STATUSES)
+	status = normalized.get("status")
+	if status:
+		if isinstance(status, list):
+			statuses = [s for s in status if s in allowed]
+		else:
+			statuses = [status] if status in allowed else []
+		normalized["status"] = statuses or list(COMPLETED_ONLY_STATUSES)
+	else:
+		normalized["status"] = list(COMPLETED_ONLY_STATUSES)
+	return normalized
+
+
+def execute_completed_task_report(filters=None, *, user=None, today=None):
+	user = user or frappe.session.user
+	_today(today)  # keep signature parity / future use
+	raw = report_filters_dict(filters)
+	normalized = _normalize_completed_report_filters(raw)
+	result_filter = normalized.pop("completion_result", None)
+
+	rows = get_task_rows(
+		normalized,
+		user=user,
+		fields=COMPLETED_REPORT_FIELDS,
+		order_by="completed_on desc, modified desc",
+	)
+
+	data = []
+	on_time = late = no_due = 0
+	completion_sum = completion_n = 0
+	delay_sum = delay_n = 0
+
+	for row in rows:
+		status = (_row_get(row, "status") or "").strip()
+		if status not in COMPLETED_ONLY_STATUSES:
+			continue
+		completed_on = _row_get(row, "completed_on")
+		due_date = _row_get(row, "due_date")
+		creation = _row_get(row, "creation")
+		result = classify_completion_result(completed_on, due_date)
+		if result_filter and result != result_filter:
+			continue
+
+		cd = completion_days(creation, completed_on)
+		dd = delay_days(completed_on, due_date)
+
+		if result == "On Time":
+			on_time += 1
+		elif result == "Late":
+			late += 1
+		else:
+			no_due += 1
+		if cd is not None:
+			completion_sum += cd
+			completion_n += 1
+		if dd is not None:
+			delay_sum += dd
+			delay_n += 1
+
+		data.append(
+			{
+				"name": _row_get(row, "name"),
+				"subject": _row_get(row, "subject"),
+				"assigned_to": _row_get(row, "assigned_to"),
+				"status": status,
+				"priority": _row_get(row, "priority"),
+				"creation": creation,
+				"due_date": due_date,
+				"completed_on": completed_on,
+				"completion_days": cd,
+				"delay_days": dd,
+				"completion_result": result,
+				"completion_remarks": _row_get(row, "completion_remarks"),
+				"completion_attachment": _row_get(row, "completion_attachment"),
+				"project": _row_get(row, "project"),
+				"department": _row_get(row, "department"),
+				"created_by": _created_by_display(row),
+				"modified": _row_get(row, "modified"),
+			}
+		)
+
+	report_summary = _summary_items(
+		[
+			("Total Completed", len(data)),
+			("On Time", on_time),
+			("Late", late),
+			("No Due Date", no_due),
+			("Average Completion Days", _avg(completion_sum, completion_n), "Float"),
+			("Average Delay Days", _avg(delay_sum, delay_n), "Float"),
+		]
+	)
+	return completed_task_columns(), data, None, None, report_summary
