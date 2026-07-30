@@ -1,4 +1,4 @@
-"""Shared builders for NAVE Task Script Reports (Phase 3 — Batch 7B).
+"""Shared builders for NAVE Task Script Reports (Phase 3 — Batches 7B/7C).
 
 Thin report modules call these helpers. Permission and filter normalization
 come from nave_task_reporting.py — not duplicated per report.
@@ -568,3 +568,235 @@ def execute_pending_aging(filters=None, *, user=None, today=None):
 		]
 	)
 	return pending_aging_columns(), data, None, None, report_summary
+
+
+# ---------------------------------------------------------------------------
+# Department / Project aggregates (Batch 7C Part 1)
+# ---------------------------------------------------------------------------
+
+
+def _empty_group_stats():
+	return {
+		"total": 0,
+		"open": 0,
+		"working": 0,
+		"pending": 0,
+		"completed": 0,
+		"closed": 0,
+		"overdue": 0,
+		"due_today": 0,
+		"high_priority": 0,
+		"last_activity": None,
+	}
+
+
+def _completion_pct(completed: int, total: int) -> float:
+	if not total:
+		return 0.0
+	return round((completed / total) * 100.0, 1)
+
+
+def _bump_group_stats(stats: dict, row, today: date) -> None:
+	status = (_row_get(row, "status") or "").strip()
+	priority = (_row_get(row, "priority") or "").strip()
+	due_date = _row_get(row, "due_date")
+	is_overdue_flag = _row_get(row, "is_overdue")
+	modified = _row_get(row, "modified")
+
+	stats["total"] += 1
+	key = {
+		"Open": "open",
+		"Working": "working",
+		"Pending": "pending",
+		"Completed": "completed",
+		"Closed": "closed",
+	}.get(status)
+	if key:
+		stats[key] += 1
+	if priority.lower() == "high":
+		stats["high_priority"] += 1
+
+	due = _as_date(due_date)
+	if due == today and not is_terminal_status(status):
+		stats["due_today"] += 1
+
+	if not is_terminal_status(status):
+		if is_overdue_flag is not None and is_overdue_flag != "":
+			if int(is_overdue_flag or 0) == 1:
+				stats["overdue"] += 1
+		elif days_overdue(due_date, status, today) > 0:
+			stats["overdue"] += 1
+
+	if modified:
+		prev = stats["last_activity"]
+		if not prev or str(modified) > str(prev):
+			stats["last_activity"] = modified
+
+
+def aggregate_by_key(rows, *, group_field: str, empty_label: str, today=None) -> dict[str, dict]:
+	"""Single-pass group aggregation for department/project reports."""
+	day = _today(today)
+	groups: dict[str, dict] = {}
+	for row in rows or []:
+		raw = _row_get(row, group_field)
+		label = (str(raw).strip() if raw else "") or empty_label
+		if label not in groups:
+			groups[label] = _empty_group_stats()
+		_bump_group_stats(groups[label], row, day)
+	return groups
+
+
+def department_task_columns():
+	return [
+		{
+			"label": "Department",
+			"fieldname": "department",
+			"fieldtype": "Data",
+			"width": 180,
+		},
+		{"label": "Total Tasks", "fieldname": "total", "fieldtype": "Int", "width": 100},
+		{"label": "Open", "fieldname": "open", "fieldtype": "Int", "width": 80},
+		{"label": "Working", "fieldname": "working", "fieldtype": "Int", "width": 90},
+		{"label": "Pending", "fieldname": "pending", "fieldtype": "Int", "width": 90},
+		{"label": "Completed", "fieldname": "completed", "fieldtype": "Int", "width": 100},
+		{"label": "Closed", "fieldname": "closed", "fieldtype": "Int", "width": 80},
+		{"label": "Overdue", "fieldname": "overdue", "fieldtype": "Int", "width": 90},
+		{"label": "Due Today", "fieldname": "due_today", "fieldtype": "Int", "width": 90},
+		{"label": "High Priority", "fieldname": "high_priority", "fieldtype": "Int", "width": 110},
+		{
+			"label": "Completion %",
+			"fieldname": "completion_pct",
+			"fieldtype": "Percent",
+			"width": 110,
+		},
+	]
+
+
+def execute_department_task_report(filters=None, *, user=None, today=None):
+	user = user or frappe.session.user
+	day = _today(today)
+	normalized = normalize_filters(report_filters_dict(filters))
+	rows = get_task_rows(
+		normalized,
+		user=user,
+		fields=REPORT_FIELDS,
+		order_by="department asc, modified desc",
+	)
+	groups = aggregate_by_key(
+		rows,
+		group_field="department",
+		empty_label="(No Department)",
+		today=day,
+	)
+	data = []
+	for department in sorted(groups.keys(), key=lambda x: (x.startswith("("), x.lower())):
+		stats = groups[department]
+		data.append(
+			{
+				"department": department,
+				"total": stats["total"],
+				"open": stats["open"],
+				"working": stats["working"],
+				"pending": stats["pending"],
+				"completed": stats["completed"],
+				"closed": stats["closed"],
+				"overdue": stats["overdue"],
+				"due_today": stats["due_today"],
+				"high_priority": stats["high_priority"],
+				"completion_pct": _completion_pct(stats["completed"], stats["total"]),
+			}
+		)
+
+	total_tasks = sum(r["total"] for r in data)
+	total_completed = sum(r["completed"] for r in data)
+	total_overdue = sum(r["overdue"] for r in data)
+	report_summary = _summary_items(
+		[
+			("Departments", len(data)),
+			("Total Tasks", total_tasks),
+			("Completed", total_completed),
+			("Overdue", total_overdue),
+		]
+	)
+	return department_task_columns(), data, None, None, report_summary
+
+
+def project_task_columns():
+	return [
+		{
+			"label": "Project",
+			"fieldname": "project",
+			"fieldtype": "Link",
+			"options": "Project",
+			"width": 180,
+		},
+		{"label": "Total Tasks", "fieldname": "total", "fieldtype": "Int", "width": 100},
+		{"label": "Open", "fieldname": "open", "fieldtype": "Int", "width": 80},
+		{"label": "Working", "fieldname": "working", "fieldtype": "Int", "width": 90},
+		{"label": "Pending", "fieldname": "pending", "fieldtype": "Int", "width": 90},
+		{"label": "Completed", "fieldname": "completed", "fieldtype": "Int", "width": 100},
+		{"label": "Closed", "fieldname": "closed", "fieldtype": "Int", "width": 80},
+		{"label": "Overdue", "fieldname": "overdue", "fieldtype": "Int", "width": 90},
+		{
+			"label": "Completion %",
+			"fieldname": "completion_pct",
+			"fieldtype": "Percent",
+			"width": 110,
+		},
+		{
+			"label": "Last Activity",
+			"fieldname": "last_activity",
+			"fieldtype": "Datetime",
+			"width": 150,
+		},
+	]
+
+
+def execute_project_task_report(filters=None, *, user=None, today=None):
+	user = user or frappe.session.user
+	day = _today(today)
+	normalized = normalize_filters(report_filters_dict(filters))
+	rows = get_task_rows(
+		normalized,
+		user=user,
+		fields=REPORT_FIELDS,
+		order_by="project asc, modified desc",
+	)
+	groups = aggregate_by_key(
+		rows,
+		group_field="project",
+		empty_label="(No Project)",
+		today=day,
+	)
+	data = []
+	for project in sorted(groups.keys(), key=lambda x: (x.startswith("("), x.lower())):
+		stats = groups[project]
+		# Empty project groups are retained; Link value left blank for Desk safety.
+		data.append(
+			{
+				"project": None if project == "(No Project)" else project,
+				"total": stats["total"],
+				"open": stats["open"],
+				"working": stats["working"],
+				"pending": stats["pending"],
+				"completed": stats["completed"],
+				"closed": stats["closed"],
+				"overdue": stats["overdue"],
+				"completion_pct": _completion_pct(stats["completed"], stats["total"]),
+				"last_activity": stats["last_activity"],
+				"_empty_project": project == "(No Project)",
+			}
+		)
+
+	total_tasks = sum(r["total"] for r in data)
+	total_completed = sum(r["completed"] for r in data)
+	total_overdue = sum(r["overdue"] for r in data)
+	report_summary = _summary_items(
+		[
+			("Projects", len(data)),
+			("Total Tasks", total_tasks),
+			("Completed", total_completed),
+			("Overdue", total_overdue),
+		]
+	)
+	return project_task_columns(), data, None, None, report_summary
