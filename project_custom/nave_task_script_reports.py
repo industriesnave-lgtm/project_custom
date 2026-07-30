@@ -1,7 +1,10 @@
-"""Shared builders for NAVE Task Script Reports (Phase 3 — Batches 7B/7C).
+"""Shared builders for NAVE Task Script Reports (Phase 3 — Batches 7B/7C/7D).
 
 Thin report modules call these helpers. Permission and filter normalization
 come from nave_task_reporting.py — not duplicated per report.
+
+Week periods use Monday–Sunday (ISO-style) consistently — no separate
+system week-start setting is consulted in this app.
 """
 
 from __future__ import annotations
@@ -1317,3 +1320,450 @@ def execute_completed_task_report(filters=None, *, user=None, today=None):
 		]
 	)
 	return completed_task_columns(), data, None, None, report_summary
+
+
+# ---------------------------------------------------------------------------
+# Weekly / Monthly Task Summary (Batch 7D)
+# ---------------------------------------------------------------------------
+#
+# Historical-status limitation:
+# "Active at Period End" and "Overdue at Period End" use the task's *current*
+# status (and due_date) as of report run time — not a reconstructed historical
+# status snapshot. Tasks created on/before the effective period end that are
+# still Open/Working/Pending are counted. Exact past status is unavailable
+# without schema/history changes (out of scope for Batch 7D).
+#
+# Week convention: Monday–Sunday.
+
+MAX_SUMMARY_RANGE_DAYS = 365 * 5 + 1
+
+PERIOD_REPORT_FIELDS = (
+	"name",
+	"status",
+	"priority",
+	"assigned_to",
+	"department",
+	"project",
+	"due_date",
+	"is_overdue",
+	"creation",
+	"completed_on",
+	"modified",
+)
+
+
+def _throw_validation(message: str) -> None:
+	exc = getattr(frappe, "ValidationError", None) or Exception
+	frappe.throw(message, exc)
+
+
+def validate_summary_date_range(from_date: date, to_date: date) -> None:
+	"""Reject inverted ranges and spans longer than 5 years."""
+	if from_date > to_date:
+		_throw_validation("From Date cannot be after To Date.")
+	if (to_date - from_date).days > MAX_SUMMARY_RANGE_DAYS:
+		_throw_validation("Date range cannot exceed 5 years.")
+
+
+def week_start_monday(day: date) -> date:
+	"""Monday of the calendar week containing day (Monday=0)."""
+	return day - timedelta(days=day.weekday())
+
+
+def generate_week_periods(from_date: date, to_date: date) -> list[dict]:
+	"""
+	Monday–Sunday weeks that overlap [from_date, to_date].
+	Partial first/last weeks are included; activity is clipped later.
+	"""
+	validate_summary_date_range(from_date, to_date)
+	periods = []
+	cursor = week_start_monday(from_date)
+	while cursor <= to_date:
+		end = cursor + timedelta(days=6)
+		periods.append(
+			{
+				"key": cursor.isoformat(),
+				"label": f"{cursor.strftime('%d %b %Y')} – {end.strftime('%d %b %Y')}",
+				"start": cursor,
+				"end": end,
+			}
+		)
+		cursor += timedelta(days=7)
+	return periods
+
+
+def generate_month_periods(from_date: date, to_date: date) -> list[dict]:
+	"""Calendar months that overlap [from_date, to_date]."""
+	validate_summary_date_range(from_date, to_date)
+	periods = []
+	year, month = from_date.year, from_date.month
+	while True:
+		start = date(year, month, 1)
+		if start > to_date:
+			break
+		if month == 12:
+			end = date(year, 12, 31)
+			next_year, next_month = year + 1, 1
+		else:
+			end = date(year, month + 1, 1) - timedelta(days=1)
+			next_year, next_month = year, month + 1
+		periods.append(
+			{
+				"key": f"{year:04d}-{month:02d}",
+				"label": start.strftime("%B %Y"),
+				"start": start,
+				"end": end,
+			}
+		)
+		year, month = next_year, next_month
+	return periods
+
+
+def _empty_period_stats() -> dict:
+	return {
+		"tasks_created": 0,
+		"completed": 0,
+		"closed": 0,
+		"active_at_end": 0,
+		"overdue_at_end": 0,
+		"on_time": 0,
+		"late": 0,
+		"completion_days_sum": 0,
+		"completion_days_n": 0,
+		"delay_days_sum": 0,
+		"delay_days_n": 0,
+	}
+
+
+def _period_activity_window(period: dict, from_date: date, to_date: date) -> tuple[date, date]:
+	return max(period["start"], from_date), min(period["end"], to_date)
+
+
+def _period_effective_end(period: dict, to_date: date) -> date:
+	return min(period["end"], to_date)
+
+
+def _resolve_summary_range(filters=None, *, today=None) -> tuple[dict, date, date, date]:
+	day = _today(today)
+	raw = report_filters_dict(filters)
+	from_date = _as_date(raw.get("from_date")) or date(day.year, 1, 1)
+	to_date = _as_date(raw.get("to_date")) or day
+	validate_summary_date_range(from_date, to_date)
+	raw["from_date"] = from_date.isoformat()
+	raw["to_date"] = to_date.isoformat()
+	return raw, from_date, to_date, day
+
+
+def _fetch_period_report_rows(raw_filters: dict, *, user: str, to_date: date):
+	"""
+	One permission-aware fetch for period reports.
+
+	Drops from_date so tasks created before the selected range remain available
+	for Active/Overdue-at-period-end (current-status snapshot). Keeps to_date so
+	creation is capped at the report end.
+	"""
+	normalized = normalize_filters(raw_filters)
+	normalized.pop("from_date", None)
+	normalized["to_date"] = to_date.isoformat()
+	return get_task_rows(
+		normalized,
+		user=user,
+		fields=PERIOD_REPORT_FIELDS,
+		order_by="creation asc",
+		limit_page_length=50000,
+	)
+
+
+def _find_period_for_date(periods_by_key: dict, kind: str, day: date):
+	if kind == "week":
+		key = week_start_monday(day).isoformat()
+	else:
+		key = f"{day.year:04d}-{day.month:02d}"
+	return periods_by_key.get(key)
+
+
+def aggregate_period_stats(
+	rows,
+	periods: list[dict],
+	*,
+	from_date: date,
+	to_date: date,
+	kind: str,
+) -> list[dict]:
+	"""
+	Single-pass aggregation into pre-built periods (including empty zeros).
+
+	kind: \"week\" | \"month\"
+	"""
+	stats_by_key = {p["key"]: _empty_period_stats() for p in periods}
+	periods_by_key = {p["key"]: p for p in periods}
+
+	for row in rows or []:
+		status = (_row_get(row, "status") or "").strip()
+		created = _as_date(_row_get(row, "creation"))
+		completed_on = _as_date(_row_get(row, "completed_on"))
+		due = _as_date(_row_get(row, "due_date"))
+
+		if created and from_date <= created <= to_date:
+			period = _find_period_for_date(periods_by_key, kind, created)
+			if period:
+				activity_start, activity_end = _period_activity_window(
+					period, from_date, to_date
+				)
+				if activity_start <= created <= activity_end:
+					stats_by_key[period["key"]]["tasks_created"] += 1
+
+		if (
+			completed_on
+			and from_date <= completed_on <= to_date
+			and status in COMPLETED_ONLY_STATUSES
+		):
+			period = _find_period_for_date(periods_by_key, kind, completed_on)
+			if period:
+				activity_start, activity_end = _period_activity_window(
+					period, from_date, to_date
+				)
+				if activity_start <= completed_on <= activity_end:
+					st = stats_by_key[period["key"]]
+					if status == "Completed":
+						st["completed"] += 1
+					else:
+						st["closed"] += 1
+					result = classify_completion_result(completed_on, due)
+					if result == "On Time":
+						st["on_time"] += 1
+					elif result == "Late":
+						st["late"] += 1
+					cd = completion_days(_row_get(row, "creation"), completed_on)
+					if cd is not None:
+						st["completion_days_sum"] += cd
+						st["completion_days_n"] += 1
+					dd = delay_days(completed_on, due)
+					if dd is not None:
+						st["delay_days_sum"] += dd
+						st["delay_days_n"] += 1
+
+		# Current-status snapshot for every period that had started by then.
+		if created and status in ACTIVE_STATUSES:
+			for period in periods:
+				effective_end = _period_effective_end(period, to_date)
+				if created > effective_end:
+					continue
+				st = stats_by_key[period["key"]]
+				st["active_at_end"] += 1
+				if due and due < effective_end:
+					st["overdue_at_end"] += 1
+
+	data = []
+	for period in periods:
+		st = stats_by_key[period["key"]]
+		done = st["completed"] + st["closed"]
+		data.append(
+			{
+				"period_label": period["label"],
+				"period_start": period["start"],
+				"period_end": period["end"],
+				"tasks_created": st["tasks_created"],
+				"completed": st["completed"],
+				"closed": st["closed"],
+				"completed_closed_total": done,
+				"active_at_end": st["active_at_end"],
+				"overdue_at_end": st["overdue_at_end"],
+				"on_time_completed": st["on_time"],
+				"late_completed": st["late"],
+				"completion_pct": _completion_pct(done, st["tasks_created"]),
+				"avg_completion_days": _avg(
+					st["completion_days_sum"], st["completion_days_n"]
+				),
+				"avg_delay_days": _avg(st["delay_days_sum"], st["delay_days_n"]),
+			}
+		)
+	return data
+
+
+def build_period_report_summary(
+	data: list[dict],
+	rows,
+	*,
+	from_date: date,
+	to_date: date,
+) -> list[dict]:
+	"""
+	Report-level summary without summing Active/Overdue across periods
+	(those would double-count). Active/Overdue = current-status snapshot as of
+	to_date among tasks created on/before to_date.
+	"""
+	total_created = sum(r["tasks_created"] for r in data)
+	total_done = sum(r["completed_closed_total"] for r in data)
+	on_time = sum(r["on_time_completed"] for r in data)
+	late = sum(r["late_completed"] for r in data)
+
+	active = overdue = 0
+	completion_sum = completion_n = 0
+	delay_sum = delay_n = 0
+	for row in rows or []:
+		status = (_row_get(row, "status") or "").strip()
+		created = _as_date(_row_get(row, "creation"))
+		completed_on = _as_date(_row_get(row, "completed_on"))
+		due = _as_date(_row_get(row, "due_date"))
+
+		if created and created <= to_date and status in ACTIVE_STATUSES:
+			active += 1
+			if due and due < to_date:
+				overdue += 1
+
+		if (
+			completed_on
+			and from_date <= completed_on <= to_date
+			and status in COMPLETED_ONLY_STATUSES
+		):
+			cd = completion_days(_row_get(row, "creation"), completed_on)
+			if cd is not None:
+				completion_sum += cd
+				completion_n += 1
+			dd = delay_days(completed_on, due)
+			if dd is not None:
+				delay_sum += dd
+				delay_n += 1
+
+	return _summary_items(
+		[
+			("Total Created", total_created),
+			("Total Completed/Closed", total_done),
+			("Active", active),
+			("Overdue", overdue),
+			("On-Time", on_time),
+			("Late", late),
+			(
+				"Overall Completion %",
+				_completion_pct(total_done, total_created),
+				"Percent",
+			),
+			("Average Completion Days", _avg(completion_sum, completion_n), "Float"),
+			("Average Delay Days", _avg(delay_sum, delay_n), "Float"),
+		]
+	)
+
+
+def _period_summary_columns(*, label_field: str, label_title: str, start_title: str, end_title: str):
+	return [
+		{"label": label_title, "fieldname": label_field, "fieldtype": "Data", "width": 200},
+		{"label": start_title, "fieldname": "period_start", "fieldtype": "Date", "width": 110},
+		{"label": end_title, "fieldname": "period_end", "fieldtype": "Date", "width": 110},
+		{"label": "Tasks Created", "fieldname": "tasks_created", "fieldtype": "Int", "width": 110},
+		{"label": "Completed", "fieldname": "completed", "fieldtype": "Int", "width": 100},
+		{"label": "Closed", "fieldname": "closed", "fieldtype": "Int", "width": 80},
+		{
+			"label": "Completed/Closed Total",
+			"fieldname": "completed_closed_total",
+			"fieldtype": "Int",
+			"width": 150,
+		},
+		{
+			"label": "Active at Period End",
+			"fieldname": "active_at_end",
+			"fieldtype": "Int",
+			"width": 140,
+		},
+		{
+			"label": "Overdue at Period End",
+			"fieldname": "overdue_at_end",
+			"fieldtype": "Int",
+			"width": 150,
+		},
+		{
+			"label": "On-Time Completed",
+			"fieldname": "on_time_completed",
+			"fieldtype": "Int",
+			"width": 130,
+		},
+		{
+			"label": "Late Completed",
+			"fieldname": "late_completed",
+			"fieldtype": "Int",
+			"width": 120,
+		},
+		{
+			"label": "Completion %",
+			"fieldname": "completion_pct",
+			"fieldtype": "Percent",
+			"width": 110,
+		},
+		{
+			"label": "Average Completion Days",
+			"fieldname": "avg_completion_days",
+			"fieldtype": "Float",
+			"width": 150,
+		},
+		{
+			"label": "Average Delay Days",
+			"fieldname": "avg_delay_days",
+			"fieldtype": "Float",
+			"width": 140,
+		},
+	]
+
+
+def weekly_task_summary_columns():
+	return _period_summary_columns(
+		label_field="week",
+		label_title="Week",
+		start_title="Week Start",
+		end_title="Week End",
+	)
+
+
+def monthly_task_summary_columns():
+	return _period_summary_columns(
+		label_field="month",
+		label_title="Month",
+		start_title="Month Start",
+		end_title="Month End",
+	)
+
+
+def _map_period_rows(data: list[dict], *, label_field: str) -> list[dict]:
+	mapped = []
+	for row in data:
+		item = dict(row)
+		item[label_field] = item.pop("period_label")
+		mapped.append(item)
+	return mapped
+
+
+def execute_weekly_task_summary_report(filters=None, *, user=None, today=None):
+	user = user or frappe.session.user
+	raw, from_date, to_date, _day = _resolve_summary_range(filters, today=today)
+	periods = generate_week_periods(from_date, to_date)
+	rows = _fetch_period_report_rows(raw, user=user, to_date=to_date)
+	data = aggregate_period_stats(
+		rows,
+		periods,
+		from_date=from_date,
+		to_date=to_date,
+		kind="week",
+	)
+	mapped = _map_period_rows(data, label_field="week")
+	summary = build_period_report_summary(
+		data, rows, from_date=from_date, to_date=to_date
+	)
+	return weekly_task_summary_columns(), mapped, None, None, summary
+
+
+def execute_monthly_task_summary_report(filters=None, *, user=None, today=None):
+	user = user or frappe.session.user
+	raw, from_date, to_date, _day = _resolve_summary_range(filters, today=today)
+	periods = generate_month_periods(from_date, to_date)
+	rows = _fetch_period_report_rows(raw, user=user, to_date=to_date)
+	data = aggregate_period_stats(
+		rows,
+		periods,
+		from_date=from_date,
+		to_date=to_date,
+		kind="month",
+	)
+	mapped = _map_period_rows(data, label_field="month")
+	summary = build_period_report_summary(
+		data, rows, from_date=from_date, to_date=to_date
+	)
+	return monthly_task_summary_columns(), mapped, None, None, summary
