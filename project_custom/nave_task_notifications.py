@@ -1,6 +1,7 @@
-"""Centralized NAVE Task notifications (Batch 4).
+"""Centralized NAVE Task notifications (Batch 4 + Batch 5 reminders).
 
 Events covered: assignment, reassignment, completion, reopen, close.
+Reminders (Batch 5): due tomorrow, due today, overdue — see nave_task_reminders.py.
 
 In-app: Frappe Notification Log.
 Email: queued frappe.sendmail (custom templates). Email failures are logged and
@@ -15,6 +16,7 @@ Duplicate prevention:
 - Per-request event keys on frappe.local (API + Document hook)
 - Per-recipient dedupe within an event
 - Skip when status/assignee did not meaningfully change
+- Reminder daily idempotency: Notification Log + cache (see reminders module)
 """
 
 from __future__ import annotations
@@ -568,7 +570,15 @@ def _default_short_message(task, *, action: str, actor: str) -> str:
 	)
 
 
-def _build_email_body(task, *, action: str, actor: str, desk_link: str, intro: str | None = None) -> str:
+def _build_email_body(
+	task,
+	*,
+	action: str,
+	actor: str,
+	desk_link: str,
+	intro: str | None = None,
+	extra_rows: list[tuple[str, str]] | None = None,
+) -> str:
 	rows = [
 		("Task title", _task_title(task)),
 		("Task ID", task.name),
@@ -581,8 +591,9 @@ def _build_email_body(task, *, action: str, actor: str, desk_link: str, intro: s
 		("Action performed", action),
 		("Action performed by", actor or "System"),
 	]
-	# Omit empty optional fields that are "—" for project/department/due when unavailable —
-	# still show for clarity with em dash.
+	if extra_rows:
+		# Insert timing rows before action fields.
+		rows = rows[:-2] + list(extra_rows) + rows[-2:]
 	intro_html = intro or f"<p>{_escape_html(action)}.</p>"
 	detail_rows = "".join(
 		f"<tr><td style='padding:4px 12px 4px 0;vertical-align:top;'>"
@@ -595,6 +606,62 @@ def _build_email_body(task, *, action: str, actor: str, desk_link: str, intro: s
 		<table style="border-collapse:collapse;margin:12px 0;">{detail_rows}</table>
 		<p><a href="{_escape_html(desk_link)}">Open NAVE Task in Desk</a></p>
 	"""
+
+
+def send_task_reminder_to_user(
+	task,
+	*,
+	user: str,
+	subject: str,
+	action: str,
+	intro: str,
+	extra_rows: list[tuple[str, str]] | None = None,
+	actor: str = "Administrator",
+) -> bool:
+	"""
+	Send one reminder (in-app + email) to a single user.
+	Returns True when delivery was attempted (user enabled + permitted).
+	Does not raise; failures are logged.
+	"""
+	try:
+		if not recipient_may_access_task(task, user):
+			return False
+		user_info = _get_user_info(user)
+		if not user_info or not user_info.get("enabled"):
+			return False
+
+		desk_link = _get_url_to_form("NAVE Task", task.name)
+		short_message = intro
+		email_body = _build_email_body(
+			task,
+			action=action,
+			actor=actor,
+			desk_link=desk_link,
+			intro=intro,
+			extra_rows=extra_rows,
+		)
+
+		# Notification Log is the durable same-day idempotency marker for reminders.
+		_create_in_app_notification(
+			user=user,
+			subject=subject,
+			message=short_message,
+			task_name=task.name,
+			actor=actor,
+			link=desk_link,
+		)
+
+		_send_email_safely(
+			user=user,
+			email=user_info.get("email"),
+			subject=subject,
+			message=email_body,
+			task_name=task.name,
+		)
+		return True
+	except Exception:
+		_log_failure("NAVE Task reminder notify failed", task, subject)
+		return False
 
 
 def _log_failure(title: str, task, event) -> None:
