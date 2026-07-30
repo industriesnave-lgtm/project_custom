@@ -305,18 +305,27 @@ def _eligible_managers_and_directors(task) -> list[str]:
 	Department managers: same department. Directors: same department only
 	(avoids notifying every director on every completion).
 	"""
+	return get_eligible_department_role_users(task, (MANAGER_ROLE, DIRECTOR_ROLE))
+
+
+def get_eligible_department_role_users(task, roles) -> list[str]:
+	"""
+	Users holding any of the given roles, matching the task department, with
+	task access under the existing NAVE permission model.
+	Does not include System Managers / Administrators (avoids site-wide noise).
+	"""
 	department = getattr(task, "department", None)
 	if not department:
 		return []
 
+	role_list = list(roles or [])
 	candidates: list[str] = []
-	for role in (MANAGER_ROLE, DIRECTOR_ROLE):
+	for role in role_list:
 		try:
 			from frappe.utils.user import get_users_with_role
 
 			candidates.extend(get_users_with_role(role) or [])
 		except Exception:
-			# Fallback for unit stubs without qb.
 			rows = frappe.get_all(
 				"Has Role",
 				filters={"role": role, "parenttype": "User"},

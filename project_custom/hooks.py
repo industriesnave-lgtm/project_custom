@@ -168,7 +168,8 @@ add_to_apps_screen = [
 
 # Scheduled Tasks
 # ---------------
-# Daily job: overdue flags, recurring generation, and due/overdue reminders.
+# Daily job: overdue flags, recurring generation, due/overdue reminders,
+# and manager/director escalation milestones (3-day / 7-day).
 # Exact execution time depends on the Frappe scheduler (not hardcoded to 09:00).
 
 scheduler_events = {

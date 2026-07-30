@@ -1183,22 +1183,25 @@ def refresh_overdue_flags():
 
 
 def run_daily_nave_task_jobs():
-	"""Combined daily job: overdue refresh + recurring generation + due reminders.
+	"""Combined daily job: overdue refresh + recurring generation + reminders + escalation.
 
-	Reminder wall-clock time follows the Frappe daily scheduler (not a fixed
-	09:00 slot unless the site is configured that way).
+	Order: assignee due/overdue reminders, then manager/director escalation milestones.
+	Wall-clock time follows the Frappe daily scheduler (not a fixed 09:00 slot).
 	"""
 	overdue = refresh_overdue_flags()
 	from project_custom.nave_task_generation import generate_due_recurring_tasks
+	from project_custom.nave_task_escalation import send_nave_task_escalations
 	from project_custom.nave_task_reminders import send_nave_task_due_reminders
 
 	recurrence = generate_due_recurring_tasks()
 	reminders = send_nave_task_due_reminders()
+	escalations = send_nave_task_escalations()
 	return {
 		"ok": True,
 		"overdue": overdue,
 		"recurrence": recurrence,
 		"reminders": reminders,
+		"escalations": escalations,
 	}
 
 

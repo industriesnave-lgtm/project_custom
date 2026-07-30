@@ -458,11 +458,17 @@ class TestReminderSending(ReminderTestCase):
 				"project_custom.nave_task_reminders.send_nave_task_due_reminders",
 				return_value={"ok": True, "sent": 0},
 			) as remind,
+			patch(
+				"project_custom.nave_task_escalation.send_nave_task_escalations",
+				return_value={"ok": True, "sent": 0},
+			) as escalate,
 		):
 			result = api.run_daily_nave_task_jobs()
 		self.assertTrue(result["ok"])
 		self.assertIn("reminders", result)
+		self.assertIn("escalations", result)
 		remind.assert_called_once()
+		escalate.assert_called_once()
 
 
 if __name__ == "__main__":
