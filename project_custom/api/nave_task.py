@@ -7,14 +7,20 @@ from project_custom.nave_task_utils import (
 	DIRECTOR_ROLE,
 	INTERNAL_NOTE_TYPE,
 	MANAGER_ROLE,
+	build_completion_field_updates,
+	build_reopen_field_updates,
 	compute_is_overdue,
+	get_allowed_next_statuses,
 	get_display_role,
+	is_manager_level_user,
+	is_reopen_transition,
 	normalize_progress,
 	to_plain_text,
 	user_can_access_task,
 	user_can_manage_task,
 	user_can_submit_progress_update,
 	user_has_nave_task_app_access,
+	validate_status_transition,
 )
 from project_custom.permissions.nave_task import user_can_see_internal_notes
 
@@ -53,6 +59,9 @@ TASK_LIST_FIELDS = [
 	"latest_update",
 	"pending_reason",
 	"support_required",
+	"completed_on",
+	"completion_remarks",
+	"completion_attachment",
 	"modified",
 	"creation",
 ]
@@ -90,6 +99,15 @@ def is_task_director(user=None):
 def is_task_manager(user=None):
 	user = user or frappe.session.user
 	return MANAGER_ROLE in frappe.get_roles(user)
+
+
+def session_is_manager_level(user=None):
+	user = user or frappe.session.user
+	return is_manager_level_user(
+		is_admin=is_admin(user),
+		is_director=is_task_director(user),
+		is_manager=is_task_manager(user),
+	)
 
 
 def require_login():
@@ -638,6 +656,17 @@ def get_task_timeline(task_name):
 			for t in CONVERSATION_UPDATE_TYPES
 			if t != INTERNAL_NOTE_TYPE or user_can_see_internal_notes()
 		),
+		"allowed_next_statuses": get_allowed_next_statuses(
+			task.status,
+			is_manager_level=session_is_manager_level() and can_manage_task_doc(task),
+			can_close=can_manage_task_doc(task) and task.status == "Completed",
+		),
+		"can_close": can_manage_task_doc(task) and task.status == "Completed",
+		"can_reopen": (
+			can_manage_task_doc(task)
+			and session_is_manager_level()
+			and task.status in ("Completed", "Closed")
+		),
 	}
 
 
@@ -675,6 +704,46 @@ def _create_history_entry(
 	return doc
 
 
+def _apply_task_updates(task, updates, *, touch_modified=True):
+	"""Apply field updates via db_set while skipping Document field-change logs."""
+	if getattr(task, "flags", None) is not None:
+		task.flags.skip_field_change_log = True
+	items = list(updates.items())
+	if not items:
+		return
+	for index, (field, value) in enumerate(items):
+		is_last = index == len(items) - 1
+		task.db_set(
+			field,
+			value,
+			update_modified=touch_modified and is_last,
+		)
+		if hasattr(task, field):
+			setattr(task, field, value)
+
+
+def _assert_status_transition(task, new_status, user=None):
+	user = user or frappe.session.user
+	try:
+		validate_status_transition(
+			task.status,
+			new_status,
+			is_manager_level=session_is_manager_level(user),
+		)
+	except ValueError as exc:
+		frappe.throw(str(exc), frappe.ValidationError)
+
+	if is_reopen_transition(task.status, new_status) and not can_manage_task_doc(task, user):
+		frappe.throw(
+			"Only an authorized manager can reopen this task.",
+			frappe.PermissionError,
+		)
+
+
+def _status_change_message(old_status, new_status):
+	return f"Status changed from {old_status or '—'} to {new_status or '—'}."
+
+
 def _assert_task_not_closed_for_normal_update(task):
 	if task.status == "Closed" and not can_manage_task_doc(task):
 		frappe.throw(
@@ -706,13 +775,7 @@ def submit_update(
 		)
 
 	_assert_task_not_closed_for_normal_update(task)
-
-	# Managers reopening a closed task may move it back to an active status.
-	if task.status == "Closed" and status not in ("Open", "Working", "Pending", "Completed"):
-		frappe.throw("Invalid reopen status for a closed task.")
-
-	if status not in ("Open", "Working", "Pending", "Completed"):
-		frappe.throw("Invalid task status.")
+	_assert_status_transition(task, status, user)
 
 	try:
 		progress = normalize_progress(status, progress)
@@ -731,52 +794,60 @@ def submit_update(
 		if support_required is not None
 		else None
 	)
+
+	updates = {
+		"status": status,
+		"progress": progress,
+		"latest_update": update_text.strip(),
+		"pending_reason": (pending_reason or "").strip(),
+		"is_overdue": compute_is_overdue(task.due_date, status, nowdate()),
+	}
+	if normalized_support is not None:
+		updates["support_required"] = normalized_support
+
+	if is_reopen_transition(previous_status, status):
+		updates.update(build_reopen_field_updates())
+		updates["progress"] = progress
+	elif status == "Completed":
+		updates.update(
+			build_completion_field_updates(
+				existing_completed_on=task.completed_on
+				if previous_status == "Completed"
+				else None,
+				remarks=update_text,
+				attachment=attachment,
+				now=now_datetime(),
+			)
+		)
+
 	update = _create_history_entry(
 		task,
 		update_type="Progress Update",
 		update_text=update_text.strip(),
-		status=status,
-		progress=progress,
+		status=updates["status"],
+		progress=updates["progress"],
 		pending_reason=pending_reason,
-		support_required=normalized_support
-		if normalized_support is not None
-		else task.support_required,
+		support_required=updates.get("support_required", task.support_required),
 		attachment=attachment,
 	)
 
-	task.db_set("status", status, update_modified=False)
-	task.db_set("progress", progress, update_modified=False)
-	task.db_set("latest_update", update_text.strip(), update_modified=False)
-	task.db_set(
-		"pending_reason",
-		(pending_reason or "").strip(),
-		update_modified=False,
-	)
-	task.db_set(
-		"is_overdue",
-		compute_is_overdue(task.due_date, status, nowdate()),
-		update_modified=False,
-	)
-	if normalized_support is not None:
-		task.db_set("support_required", normalized_support, update_modified=True)
-	else:
-		task.db_set("latest_update", update_text.strip(), update_modified=True)
+	_apply_task_updates(task, updates, touch_modified=True)
 
-	if previous_status != status:
+	if previous_status != updates["status"]:
 		_create_history_entry(
 			task,
 			update_type="Status Change",
-			update_text=f"Status changed from {previous_status} to {status}.",
-			status=status,
-			progress=progress,
+			update_text=_status_change_message(previous_status, updates["status"]),
+			status=updates["status"],
+			progress=updates["progress"],
 		)
 
 	return {
 		"ok": True,
 		"task": task.name,
 		"update": update.name,
-		"status": status,
-		"progress": progress,
+		"status": updates["status"],
+		"progress": updates["progress"],
 	}
 
 
@@ -834,6 +905,7 @@ def post_task_message(
 
 	new_status = task.status
 	new_progress = flt(task.progress)
+	field_updates = {}
 
 	if update_type == "Progress Update" and can_submit_progress_on_task(task, user):
 		if status:
@@ -843,40 +915,77 @@ def post_task_message(
 				new_progress = normalize_progress(new_status, progress)
 			except ValueError as exc:
 				frappe.throw(str(exc))
+		if new_status != task.status:
+			_assert_status_transition(task, new_status, user)
+		if is_reopen_transition(task.status, new_status):
+			field_updates.update(build_reopen_field_updates())
+			field_updates["progress"] = new_progress
+		elif new_status == "Completed" and task.status != "Completed":
+			field_updates.update(
+				build_completion_field_updates(
+					existing_completed_on=None,
+					remarks=message,
+					attachment=attachment,
+					now=now_datetime(),
+				)
+			)
+			new_progress = 100
+		else:
+			field_updates["status"] = new_status
+			field_updates["progress"] = new_progress
 	elif update_type == "Completion Update":
 		if not can_submit_progress_on_task(task, user) and not can_manage_task_doc(task, user):
 			frappe.throw(
 				"You are not permitted to post a Completion Update on this task.",
 				frappe.PermissionError,
 			)
+		_assert_status_transition(task, "Completed", user)
+		field_updates.update(
+			build_completion_field_updates(
+				existing_completed_on=task.completed_on if task.status == "Completed" else None,
+				remarks=message,
+				attachment=attachment,
+				now=now_datetime(),
+			)
+		)
 		new_status = "Completed"
 		new_progress = 100
 
+	previous_status = task.status
 	update = _create_history_entry(
 		task,
 		update_type=update_type,
 		update_text=message.strip(),
-		status=new_status,
-		progress=new_progress,
+		status=field_updates.get("status", new_status),
+		progress=field_updates.get("progress", new_progress),
 		attachment=attachment,
 	)
 
-	# Apply task field changes only for progress/completion conversation types.
-	if update_type in ("Progress Update", "Completion Update") and (
-		new_status != task.status or flt(new_progress) != flt(task.progress)
-	):
-		if getattr(task, "flags", None) is not None:
-			task.flags.skip_field_change_log = True
-		task.db_set("status", new_status, update_modified=False)
-		task.db_set("progress", new_progress, update_modified=False)
-		task.db_set(
-			"is_overdue",
-			compute_is_overdue(task.due_date, new_status, nowdate()),
-			update_modified=False,
+	if field_updates:
+		field_updates["is_overdue"] = compute_is_overdue(
+			task.due_date,
+			field_updates.get("status", new_status),
+			nowdate(),
 		)
-
-	if update_type != INTERNAL_NOTE_TYPE:
+		if update_type != INTERNAL_NOTE_TYPE:
+			field_updates["latest_update"] = message.strip()
+		_apply_task_updates(task, field_updates, touch_modified=True)
+		if previous_status != field_updates.get("status", previous_status):
+			_create_history_entry(
+				task,
+				update_type="Status Change",
+				update_text=_status_change_message(
+					previous_status,
+					field_updates.get("status"),
+				),
+				status=field_updates.get("status"),
+				progress=field_updates.get("progress", new_progress),
+			)
+	elif update_type != INTERNAL_NOTE_TYPE:
 		task.db_set("latest_update", message.strip(), update_modified=True)
+
+	final_status = field_updates.get("status", new_status)
+	final_progress = field_updates.get("progress", new_progress)
 
 	return {
 		"ok": True,
@@ -891,8 +1000,8 @@ def post_task_message(
 				"employee": getattr(update, "employee", None),
 				"updated_on": getattr(update, "updated_on", None),
 				"update_type": getattr(update, "update_type", update_type),
-				"status": getattr(update, "status", new_status),
-				"progress": getattr(update, "progress", new_progress),
+				"status": getattr(update, "status", final_status),
+				"progress": getattr(update, "progress", final_progress),
 				"update_text": getattr(update, "update_text", message.strip()),
 				"pending_reason": getattr(update, "pending_reason", None),
 				"support_required": getattr(update, "support_required", None),
@@ -993,16 +1102,20 @@ def close_task(task_name, remarks=None):
 	if task.status == "Cancelled":
 		frappe.throw("Cancelled tasks cannot be closed.")
 
+	_assert_status_transition(task, "Closed", user)
+
 	previous_status = task.status
 	remarks_text = (remarks or "").strip() or f"Task closed (was {previous_status})."
 
-	task.db_set("status", "Closed", update_modified=False)
-	task.db_set(
-		"is_overdue",
-		compute_is_overdue(task.due_date, "Closed", nowdate()),
-		update_modified=False,
+	_apply_task_updates(
+		task,
+		{
+			"status": "Closed",
+			"is_overdue": compute_is_overdue(task.due_date, "Closed", nowdate()),
+			"latest_update": remarks_text,
+		},
+		touch_modified=True,
 	)
-	task.db_set("latest_update", remarks_text, update_modified=True)
 
 	update = _create_history_entry(
 		task,

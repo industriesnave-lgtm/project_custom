@@ -8,9 +8,17 @@ from project_custom.nave_task_recurrence import (
 	validate_recurrence_config,
 )
 from project_custom.nave_task_utils import (
+	DIRECTOR_ROLE,
+	MANAGER_ROLE,
 	TRACKED_FIELD_LABELS,
+	build_completion_field_updates,
+	build_reopen_field_updates,
 	compute_is_overdue,
 	format_field_change_message,
+	is_completion_transition,
+	is_manager_level_user,
+	is_reopen_transition,
+	validate_status_transition,
 	values_differ,
 )
 
@@ -23,10 +31,12 @@ class NAVETask(Document):
 		self.ensure_recurrence_defaults()
 
 	def validate(self):
+		previous_status = self._previous_status()
 		self.validate_dates()
 		self.validate_progress()
+		self.validate_status_workflow(previous_status)
+		self.apply_completion_and_reopen_fields(previous_status)
 		self.set_employee_details()
-		self.set_completion_details()
 		self.set_overdue_status()
 		self.validate_recurrence()
 		self.normalize_support_required_value()
@@ -34,6 +44,67 @@ class NAVETask(Document):
 	def on_update(self):
 		self.log_tracked_field_changes()
 		self.sync_assignment_todos_after_save()
+
+	def _previous_status(self):
+		if self.is_new():
+			return None
+		before = self.get_doc_before_save()
+		if before:
+			return before.get("status")
+		return frappe.db.get_value(self.doctype, self.name, "status")
+
+	def _session_is_manager_level(self):
+		user = frappe.session.user
+		roles = frappe.get_roles(user)
+		return is_manager_level_user(
+			is_admin=user == "Administrator" or "System Manager" in roles,
+			is_director=DIRECTOR_ROLE in roles,
+			is_manager=MANAGER_ROLE in roles,
+		)
+
+	def validate_status_workflow(self, previous_status):
+		if self.is_new():
+			return
+		try:
+			validate_status_transition(
+				previous_status,
+				self.status,
+				is_manager_level=self._session_is_manager_level(),
+			)
+		except ValueError as exc:
+			frappe.throw(str(exc))
+
+	def apply_completion_and_reopen_fields(self, previous_status):
+		if is_reopen_transition(previous_status, self.status):
+			for field, value in build_reopen_field_updates().items():
+				setattr(self, field, value)
+			return
+
+		if self.status == "Completed":
+			updates = build_completion_field_updates(
+				existing_completed_on=self.completed_on
+				if previous_status == "Completed"
+				else None,
+				remarks=self.completion_remarks,
+				attachment=self.completion_attachment,
+				now=now_datetime(),
+			)
+			# Form path: keep any remarks/attachment already on the doc; force status/progress/on.
+			self.status = updates["status"]
+			self.progress = updates["progress"]
+			if "completed_on" in updates:
+				self.completed_on = updates["completed_on"]
+			return
+
+		if is_completion_transition(previous_status, self.status):
+			# Defensive: handled above when status is Completed.
+			pass
+
+		# Leaving Completed/Closed to a non-reopen path is blocked by the matrix.
+		# Clear completed_on when moving to active statuses other than reopen helper.
+		if self.status in ("Open", "Working", "Pending") and previous_status == "Completed":
+			# Only reachable if somehow same-status logic fails; reopen clears via helper.
+			self.completed_on = None
 
 	def ensure_recurrence_defaults(self):
 		if self.is_recurring is None:
@@ -116,13 +187,6 @@ class NAVETask(Document):
 		if self.status == "Open" and progress > 0:
 			self.status = "Working"
 
-	def set_completion_details(self):
-		if self.status == "Completed":
-			if not self.completed_on:
-				self.completed_on = now_datetime()
-		elif self.status not in ("Closed",):
-			self.completed_on = None
-
 	def set_overdue_status(self):
 		self.is_overdue = compute_is_overdue(
 			self.due_date,
@@ -133,6 +197,7 @@ class NAVETask(Document):
 	def log_tracked_field_changes(self):
 		"""
 		Create exactly one System timeline entry per changed tracked field.
+		Status changes use a single Status Change entry instead of System.
 		Skipped when APIs set flags.skip_field_change_log or during migrate.
 		"""
 		if self.flags.get("skip_field_change_log"):
@@ -147,6 +212,13 @@ class NAVETask(Document):
 			return
 
 		logged = set(self.flags.get("logged_field_changes") or [])
+		status_changed = values_differ(before.get("status"), self.status, fieldname="status")
+
+		if status_changed and "status" not in logged:
+			self._insert_status_change_entry(before.get("status"), self.status)
+			logged.add("status")
+			# Avoid duplicate progress System row when status workflow also changes progress.
+			logged.add("progress")
 
 		for fieldname in TRACKED_FIELD_LABELS:
 			if fieldname in logged:
@@ -161,17 +233,29 @@ class NAVETask(Document):
 
 		self.flags.logged_field_changes = logged
 
+	def _insert_status_change_entry(self, old_status, new_status):
+		message = f"Status changed from {old_status or '—'} to {new_status or '—'}."
+		self._insert_timeline_entry(
+			update_type="Status Change",
+			update_text=message,
+		)
+
 	def _insert_system_field_change(self, fieldname, old_value, new_value):
+		message = format_field_change_message(fieldname, old_value, new_value)
+		self._insert_timeline_entry(
+			update_type="System",
+			update_text=message,
+		)
+
+	def _insert_timeline_entry(self, *, update_type, update_text):
 		from frappe.utils import time_diff_in_seconds
 
-		# Avoid duplicates if an identical System row was just written in this request.
-		message = format_field_change_message(fieldname, old_value, new_value)
 		recent = frappe.db.exists(
 			"NAVE Task Update",
 			{
 				"task": self.name,
-				"update_type": "System",
-				"update_text": message,
+				"update_type": update_type,
+				"update_text": update_text,
 				"update_by": frappe.session.user,
 			},
 		)
@@ -192,10 +276,10 @@ class NAVETask(Document):
 				"update_by": frappe.session.user,
 				"employee": employee,
 				"updated_on": now_datetime(),
-				"update_type": "System",
+				"update_type": update_type,
 				"status": self.status,
 				"progress": flt(self.progress),
-				"update_text": message,
+				"update_text": update_text,
 			}
 		).insert(ignore_permissions=True)
 

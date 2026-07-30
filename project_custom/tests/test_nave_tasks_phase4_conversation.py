@@ -253,6 +253,7 @@ class TestTimelineEnrichment(unittest.TestCase):
 		with (
 			patch.object(self.api, "get_task_for_user", return_value=task),
 			patch.object(self.api, "user_can_see_internal_notes", return_value=True),
+			patch.object(self.api, "get_user_department", return_value="Sales"),
 			patch.object(self.frappe, "get_list", return_value=[row]),
 			patch.object(self.api, "get_user_full_name", return_value="Manager Person"),
 			patch.object(
@@ -273,6 +274,7 @@ class TestTimelineEnrichment(unittest.TestCase):
 
 	def test_employee_timeline_excludes_internal_notes(self):
 		self.frappe.session.user = "emp@example.com"
+		self.frappe.get_roles = lambda user=None: ["Employee"]
 		task = types.SimpleNamespace(
 			name="NT-2026-00001",
 			assigned_to="emp@example.com",
@@ -318,6 +320,7 @@ class TestTimelineEnrichment(unittest.TestCase):
 		with (
 			patch.object(self.api, "get_task_for_user", return_value=task),
 			patch.object(self.api, "user_can_see_internal_notes", return_value=False),
+			patch.object(self.api, "get_user_department", return_value="Sales"),
 			patch.object(self.frappe, "get_list", side_effect=fake_get_list),
 			patch.object(self.api, "get_user_full_name", return_value="Emp"),
 			patch.object(self.api, "is_admin", return_value=False),

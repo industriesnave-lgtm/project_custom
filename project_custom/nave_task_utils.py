@@ -274,3 +274,136 @@ def values_differ(old_value, new_value, *, fieldname: str) -> bool:
 	if fieldname == "due_date":
 		return str(old_value or "") != str(new_value or "")
 	return (old_value or "") != (new_value or "")
+
+
+# ---------------------------------------------------------------------------
+# Status workflow (shared source of truth for form, APIs, and UI)
+# ---------------------------------------------------------------------------
+
+STATUS_TRANSITIONS = {
+	"Open": frozenset({"Working"}),
+	"Working": frozenset({"Pending", "Completed"}),
+	"Pending": frozenset({"Working", "Completed"}),
+	"Completed": frozenset({"Closed", "Working"}),
+	"Closed": frozenset({"Working"}),
+}
+
+MANAGER_ONLY_TRANSITIONS = frozenset(
+	{
+		("Completed", "Working"),
+		("Closed", "Working"),
+	}
+)
+
+
+def is_manager_level_user(*, is_admin: bool, is_director: bool, is_manager: bool) -> bool:
+	"""NAVE Task Manager, Director, System Manager, or Administrator."""
+	return bool(is_admin or is_director or is_manager)
+
+
+def get_allowed_next_statuses(
+	current: str | None,
+	*,
+	is_manager_level: bool,
+	can_close: bool = False,
+) -> list[str]:
+	"""
+	Allowed next statuses including the current status (same-status updates).
+	Manager-only reopen transitions are omitted when is_manager_level is False.
+	Completed → Closed is included only when can_close is True.
+	"""
+	current = current or "Open"
+	allowed = set(STATUS_TRANSITIONS.get(current, frozenset()))
+	if not is_manager_level:
+		allowed = {
+			status
+			for status in allowed
+			if (current, status) not in MANAGER_ONLY_TRANSITIONS
+		}
+	if not can_close:
+		allowed.discard("Closed")
+	ordered = [current]
+	for status in ("Open", "Working", "Pending", "Completed", "Closed", "Cancelled"):
+		if status in allowed and status != current:
+			ordered.append(status)
+	return ordered
+
+
+def is_status_transition_allowed(
+	old_status: str | None,
+	new_status: str | None,
+	*,
+	is_manager_level: bool,
+) -> bool:
+	if not new_status:
+		return False
+	# New documents / missing previous status: allow default Open (and Open→Working bump).
+	if not old_status:
+		return new_status in ("Open", "Working")
+	if old_status == new_status:
+		return True
+	allowed = STATUS_TRANSITIONS.get(old_status, frozenset())
+	if new_status not in allowed:
+		return False
+	if (old_status, new_status) in MANAGER_ONLY_TRANSITIONS and not is_manager_level:
+		return False
+	return True
+
+
+def validate_status_transition(
+	old_status: str | None,
+	new_status: str | None,
+	*,
+	is_manager_level: bool,
+) -> None:
+	if is_status_transition_allowed(
+		old_status,
+		new_status,
+		is_manager_level=is_manager_level,
+	):
+		return
+	old_display = old_status or "—"
+	new_display = new_status or "—"
+	raise ValueError(f"Cannot change status from {old_display} to {new_display}.")
+
+
+def build_completion_field_updates(
+	*,
+	existing_completed_on=None,
+	remarks=None,
+	attachment=None,
+	now=None,
+) -> dict:
+	"""
+	Fields to apply when marking a task Completed.
+	Does not overwrite completed_on if already set while remaining Completed.
+	"""
+	updates = {
+		"status": "Completed",
+		"progress": 100,
+	}
+	if not existing_completed_on:
+		updates["completed_on"] = now
+	remarks_text = (remarks or "").strip() if remarks is not None else None
+	if remarks_text:
+		updates["completion_remarks"] = remarks_text
+	attachment_value = (attachment or "").strip() if attachment is not None else None
+	if attachment_value:
+		updates["completion_attachment"] = attachment_value
+	return updates
+
+
+def build_reopen_field_updates() -> dict:
+	"""Reopen to Working; clear completed_on; keep remarks/attachment history."""
+	return {
+		"status": "Working",
+		"completed_on": None,
+	}
+
+
+def is_reopen_transition(old_status: str | None, new_status: str | None) -> bool:
+	return (old_status, new_status) in MANAGER_ONLY_TRANSITIONS
+
+
+def is_completion_transition(old_status: str | None, new_status: str | None) -> bool:
+	return new_status == "Completed" and old_status != "Completed"

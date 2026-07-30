@@ -498,7 +498,7 @@ class TestActionRulesWithMocks(unittest.TestCase):
 	def test_close_permission_allowed_for_manager(self):
 		self.frappe.session.user = "mgr@example.com"
 		self.frappe.get_roles = lambda user=None: ["NAVE Task Manager"]
-		task = self._task()
+		task = self._task(status="Completed", progress=100)
 		history = types.SimpleNamespace(name="NTU-2026-00004")
 
 		with (

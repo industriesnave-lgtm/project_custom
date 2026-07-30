@@ -109,14 +109,38 @@ class TestActionButtonVisibility(unittest.TestCase):
 	def test_creator_sees_reassign_and_close(self):
 		vis = get_task_action_visibility(
 			user="creator@example.com",
-			task=self._task(),
+			task=self._task(status="Completed"),
 			is_admin=False,
 			is_manager=False,
 			user_department="Sales",
 		)
 		self.assertTrue(vis["reassign"])
 		self.assertTrue(vis["close_task"])
-		self.assertFalse(vis["submit_update"])
+		self.assertFalse(vis["reopen_task"])
+
+	def test_employee_cannot_reopen_completed(self):
+		vis = get_task_action_visibility(
+			user="emp@example.com",
+			task=self._task(status="Completed"),
+			is_admin=False,
+			is_manager=False,
+			user_department="Sales",
+		)
+		self.assertFalse(vis["reopen_task"])
+		self.assertFalse(vis["close_task"])
+		self.assertNotIn("Working", vis["allowed_next_statuses"])
+
+	def test_manager_can_reopen_closed(self):
+		vis = get_task_action_visibility(
+			user="mgr@example.com",
+			task=self._task(status="Closed", department="Sales"),
+			is_admin=False,
+			is_manager=True,
+			user_department="Sales",
+		)
+		self.assertTrue(vis["reopen_task"])
+		self.assertIn("Working", vis["allowed_next_statuses"])
+		self.assertFalse(vis["close_task"])
 
 	def test_closed_task_ui_restrictions_for_employee(self):
 		vis = get_task_action_visibility(

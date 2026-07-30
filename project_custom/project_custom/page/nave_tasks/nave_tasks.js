@@ -83,6 +83,8 @@ frappe.pages["nave-tasks"].on_page_load = function (wrapper) {
 
 	const is_manager = () => frappe.user.has_role("NAVE Task Manager");
 
+	const is_manager_level = () => is_admin() || is_director() || is_manager();
+
 	const can_manage_task = (task) => {
 		const user = current_user();
 		if (is_admin() || is_director()) return true;
@@ -111,18 +113,40 @@ frappe.pages["nave-tasks"].on_page_load = function (wrapper) {
 		return false;
 	};
 
+	const allowed_next_statuses = (task) => {
+		const status = task.status || "Open";
+		const manage = can_manage_task(task);
+		const manager_level = is_manager_level() && manage;
+		const map = {
+			Open: ["Working"],
+			Working: ["Pending", "Completed"],
+			Pending: ["Working", "Completed"],
+			Completed: [
+				...(manage ? ["Closed"] : []),
+				...(manager_level ? ["Working"] : []),
+			],
+			Closed: manager_level ? ["Working"] : [],
+		};
+		const next = map[status] || [];
+		return [status, ...next.filter((s) => s !== status)];
+	};
+
 	const action_visibility = (task) => {
 		const closed = task.status === "Closed";
 		const cancelled = task.status === "Cancelled";
+		const completed = task.status === "Completed";
 		const manage = can_manage_task(task);
 		const update = can_submit_update(task);
+		const manager_level = is_manager_level();
 		return {
 			open_task: true,
 			view_updates: true,
 			reply: !cancelled,
-			submit_update: update && !cancelled && (!closed || manage),
+			submit_update: update && !cancelled && (!closed || (manager_level && manage)),
 			reassign: manage && !cancelled,
-			close_task: manage && !closed && !cancelled,
+			close_task: manage && completed,
+			reopen_task: manage && manager_level && (completed || closed),
+			allowed_next_statuses: allowed_next_statuses(task),
 		};
 	};
 
@@ -1036,10 +1060,12 @@ frappe.pages["nave-tasks"].on_page_load = function (wrapper) {
 	};
 
 	const open_update_dialog = (task) => {
-		if (task.status === "Closed" && !can_manage_task(task)) {
-			frappe.msgprint("Closed tasks cannot accept normal updates.");
+		const actions = action_visibility(task);
+		if (!actions.submit_update) {
+			frappe.msgprint("You cannot submit an update on this task.");
 			return;
 		}
+		const status_options = (actions.allowed_next_statuses || [task.status]).join("\n");
 		const dialog = new frappe.ui.Dialog({
 			title: `Update ${task.name || ""}`,
 			fields: [
@@ -1047,8 +1073,8 @@ frappe.pages["nave-tasks"].on_page_load = function (wrapper) {
 					fieldname: "status",
 					fieldtype: "Select",
 					label: "Status",
-					options: "Open\nWorking\nPending\nCompleted",
-					default: task.status === "Closed" ? "Open" : task.status || "Working",
+					options: status_options,
+					default: task.status || "Working",
 					reqd: 1,
 				},
 				{

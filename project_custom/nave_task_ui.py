@@ -6,6 +6,8 @@ from project_custom.nave_task_utils import (
 	CONVERSATION_UPDATE_TYPES,
 	INTERNAL_NOTE_TYPE,
 	can_access_internal_notes,
+	get_allowed_next_statuses,
+	is_manager_level_user,
 	user_can_access_task,
 	user_can_manage_task,
 	user_can_submit_progress_update,
@@ -109,17 +111,32 @@ def get_task_action_visibility(
 		department=task.get("department"),
 		user_department=user_department,
 	)
+	manager_level = is_manager_level_user(
+		is_admin=is_admin,
+		is_director=is_director,
+		is_manager=is_manager,
+	)
 
 	closed = status == "Closed"
 	cancelled = status == "Cancelled"
+	completed = status == "Completed"
+	allowed_statuses = get_allowed_next_statuses(
+		status,
+		is_manager_level=manager_level and can_manage,
+		can_close=can_manage and completed,
+	)
 
 	return {
 		"open_task": can_view,
 		"view_updates": can_view,
 		"reply": can_view and not cancelled,
-		"submit_update": can_update and not cancelled and (not closed or can_manage),
+		"submit_update": can_update
+		and not cancelled
+		and (not closed or (manager_level and can_manage)),
 		"reassign": can_manage and not cancelled,
-		"close_task": can_manage and not closed and not cancelled,
+		"close_task": can_manage and completed,
+		"reopen_task": can_manage and manager_level and status in ("Completed", "Closed"),
+		"allowed_next_statuses": allowed_statuses,
 	}
 
 
