@@ -1,6 +1,11 @@
 import frappe
 from frappe.utils import add_days, cint, flt, now_datetime, nowdate
 
+from project_custom.nave_task_notifications import (
+	EVENT_REASSIGNED,
+	notify_nave_task_event,
+	notify_status_change,
+)
 from project_custom.nave_task_recurrence import normalize_support_required
 from project_custom.nave_task_utils import (
 	CONVERSATION_UPDATE_TYPES,
@@ -841,6 +846,7 @@ def submit_update(
 			status=updates["status"],
 			progress=updates["progress"],
 		)
+		notify_status_change(task, previous_status, updates["status"], actor=user)
 
 	return {
 		"ok": True,
@@ -981,6 +987,12 @@ def post_task_message(
 				status=field_updates.get("status"),
 				progress=field_updates.get("progress", new_progress),
 			)
+			notify_status_change(
+				task,
+				previous_status,
+				field_updates.get("status"),
+				actor=user,
+			)
 	elif update_type != INTERNAL_NOTE_TYPE:
 		task.db_set("latest_update", message.strip(), update_modified=True)
 
@@ -1074,6 +1086,12 @@ def reassign_task(task_name, assigned_to, note=None):
 	task.reload()
 	# db_set bypasses Document.on_update — sync ToDos explicitly for API reassign.
 	task.sync_assignment_todos(previous_assignee=previous_assignee)
+	notify_nave_task_event(
+		task,
+		EVENT_REASSIGNED,
+		actor=user,
+		previous_assignee=previous_assignee,
+	)
 
 	return {
 		"ok": True,
@@ -1124,6 +1142,7 @@ def close_task(task_name, remarks=None):
 		status="Closed",
 		progress=task.progress,
 	)
+	notify_status_change(task, previous_status, "Closed", actor=user)
 
 	return {
 		"ok": True,

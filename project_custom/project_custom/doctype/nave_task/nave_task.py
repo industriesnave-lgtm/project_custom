@@ -2,6 +2,10 @@ import frappe
 from frappe.model.document import Document
 from frappe.utils import flt, getdate, now_datetime, nowdate
 
+from project_custom.nave_task_notifications import (
+	notify_document_insert,
+	notify_document_update,
+)
 from project_custom.nave_task_recurrence import (
 	initial_next_creation_date,
 	normalize_support_required,
@@ -44,6 +48,7 @@ class NAVETask(Document):
 	def on_update(self):
 		self.log_tracked_field_changes()
 		self.sync_assignment_todos_after_save()
+		notify_document_update(self)
 
 	def _previous_status(self):
 		if self.is_new():
@@ -285,6 +290,7 @@ class NAVETask(Document):
 
 	def after_insert(self):
 		self.create_assignment_todo()
+		notify_document_insert(self)
 
 	def cancel_open_assignment_todos(self, allocated_to):
 		"""Cancel Open ToDos for a previous assignee on this task."""
