@@ -244,6 +244,25 @@ def _as_filter_list(filters):
 	return result
 
 
+RECENTLY_UPDATED_DAYS = 7
+
+
+def recently_updated_modified_after(today=None):
+	"""Cutoff datetime string matching get_dashboard_counts recently_updated."""
+	today = today or nowdate()
+	cutoff = add_days(today, -RECENTLY_UPDATED_DAYS)
+	return f"{cutoff} 00:00:00"
+
+
+def _normalize_modified_after(modified_after):
+	value = (modified_after or "").strip()
+	if not value:
+		return None
+	if " " not in value:
+		return f"{value} 00:00:00"
+	return value
+
+
 def _apply_common_filters(
 	filters,
 	*,
@@ -254,6 +273,7 @@ def _apply_common_filters(
 	due_date=None,
 	due_before=None,
 	due_after=None,
+	modified_after=None,
 	search=None,
 ):
 	filters = _as_filter_list(filters)
@@ -272,6 +292,9 @@ def _apply_common_filters(
 		filters.append(["due_date", "<=", due_before])
 	if due_after:
 		filters.append(["due_date", ">=", due_after])
+	normalized_modified = _normalize_modified_after(modified_after)
+	if normalized_modified:
+		filters.append(["modified", ">=", normalized_modified])
 	if search:
 		term = f"%{(search or '').strip()}%"
 		if term != "%%":
@@ -337,6 +360,7 @@ def get_my_tasks(
 	due_date=None,
 	due_before=None,
 	due_after=None,
+	modified_after=None,
 	search=None,
 ):
 	"""Tasks assigned to the current user."""
@@ -349,6 +373,7 @@ def get_my_tasks(
 		due_date=due_date,
 		due_before=due_before,
 		due_after=due_after,
+		modified_after=modified_after,
 		search=search,
 	)
 	return _list_tasks(filters, page=page, page_length=page_length)
@@ -365,6 +390,7 @@ def get_tasks_created_by_me(
 	due_date=None,
 	due_before=None,
 	due_after=None,
+	modified_after=None,
 	search=None,
 ):
 	"""Tasks created by the current user (owner or assigned_by)."""
@@ -379,6 +405,7 @@ def get_tasks_created_by_me(
 		due_date=due_date,
 		due_before=due_before,
 		due_after=due_after,
+		modified_after=modified_after,
 		search=search,
 	)
 	or_filters = [
@@ -405,6 +432,7 @@ def get_all_tasks(
 	due_date=None,
 	due_before=None,
 	due_after=None,
+	modified_after=None,
 	search=None,
 ):
 	"""All tasks visible to the current user via permission hooks."""
@@ -419,6 +447,7 @@ def get_all_tasks(
 		due_date=due_date,
 		due_before=due_before,
 		due_after=due_after,
+		modified_after=modified_after,
 		search=search,
 	)
 	if creator:
@@ -523,7 +552,7 @@ def get_dashboard_counts():
 	require_login()
 	today = nowdate()
 	week = add_days(today, 7)
-	recent_cutoff = add_days(today, -7)
+	recent_modified_after = recently_updated_modified_after(today)
 
 	return {
 		"open": _permission_aware_count("NAVE Task", {"status": "Open"}),
@@ -548,8 +577,9 @@ def get_dashboard_counts():
 		),
 		"recently_updated": _permission_aware_count(
 			"NAVE Task",
-			[["modified", ">=", f"{recent_cutoff} 00:00:00"]],
+			[["modified", ">=", recent_modified_after]],
 		),
+		"recently_updated_modified_after": recent_modified_after,
 	}
 
 
@@ -913,7 +943,8 @@ def reassign_task(task_name, assigned_to, note=None):
 	task.db_set("latest_update", history_text, update_modified=True)
 
 	task.reload()
-	task.create_assignment_todo()
+	# db_set bypasses Document.on_update — sync ToDos explicitly for API reassign.
+	task.sync_assignment_todos(previous_assignee=previous_assignee)
 
 	return {
 		"ok": True,

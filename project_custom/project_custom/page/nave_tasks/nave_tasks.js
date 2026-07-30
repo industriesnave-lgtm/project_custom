@@ -29,6 +29,9 @@ frappe.pages["nave-tasks"].on_page_load = function (wrapper) {
 				due_date: "",
 			},
 			employee_department: null,
+			_due_before: "",
+			_due_after: "",
+			_modified_after: "",
 		},
 		VIEW_API: {
 			my_tasks: "project_custom.api.nave_task.get_my_tasks",
@@ -216,6 +219,9 @@ frappe.pages["nave-tasks"].on_page_load = function (wrapper) {
 		});
 
 		page.main.find(".nt-nav-btn").on("click", function () {
+			APP.state._due_before = "";
+			APP.state._due_after = "";
+			APP.state._modified_after = "";
 			set_view($(this).data("view"));
 		});
 		page.main.find(".nt-refresh").on("click", () => load_current(true));
@@ -504,6 +510,10 @@ frappe.pages["nave-tasks"].on_page_load = function (wrapper) {
 			creator: "",
 			due_date: "",
 		};
+		APP.state._due_before = "";
+		APP.state._due_after = "";
+		APP.state._modified_after = "";
+
 		if (key === "overdue") {
 			set_view("overdue_tasks");
 			return;
@@ -517,13 +527,10 @@ frappe.pages["nave-tasks"].on_page_load = function (wrapper) {
 			APP.state.filters.due_date = "";
 			APP.state._due_before = add_days(today_str(), 7);
 			APP.state._due_after = today_str();
-		} else {
-			APP.state._due_before = "";
-			APP.state._due_after = "";
 		}
 		if (key === "recently_updated") {
-			APP.state._due_before = "";
-			APP.state._due_after = "";
+			// Match get_dashboard_counts: modified >= (today - 7 days) 00:00:00
+			APP.state._modified_after = `${add_days(today_str(), -7)} 00:00:00`;
 		}
 		set_view("all_tasks");
 	};
@@ -1243,6 +1250,7 @@ frappe.pages["nave-tasks"].on_page_load = function (wrapper) {
 		};
 		if (APP.state._due_before) args.due_before = APP.state._due_before;
 		if (APP.state._due_after) args.due_after = APP.state._due_after;
+		if (APP.state._modified_after) args.modified_after = APP.state._modified_after;
 		return args;
 	};
 

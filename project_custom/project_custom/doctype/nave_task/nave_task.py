@@ -33,6 +33,7 @@ class NAVETask(Document):
 
 	def on_update(self):
 		self.log_tracked_field_changes()
+		self.sync_assignment_todos_after_save()
 
 	def ensure_recurrence_defaults(self):
 		if self.is_recurring is None:
@@ -201,6 +202,31 @@ class NAVETask(Document):
 	def after_insert(self):
 		self.create_assignment_todo()
 
+	def cancel_open_assignment_todos(self, allocated_to):
+		"""Cancel Open ToDos for a previous assignee on this task."""
+		if not allocated_to or not self.name:
+			return 0
+
+		todos = frappe.get_all(
+			"ToDo",
+			filters={
+				"reference_type": self.doctype,
+				"reference_name": self.name,
+				"allocated_to": allocated_to,
+				"status": "Open",
+			},
+			pluck="name",
+		)
+		for todo_name in todos:
+			frappe.db.set_value(
+				"ToDo",
+				todo_name,
+				"status",
+				"Cancelled",
+				update_modified=False,
+			)
+		return len(todos)
+
 	def create_assignment_todo(self):
 		if not self.assigned_to:
 			return
@@ -232,3 +258,22 @@ class NAVETask(Document):
 			}
 		)
 		todo.insert(ignore_permissions=True)
+
+	def sync_assignment_todos(self, previous_assignee=None):
+		"""
+		Cancel previous assignee Open ToDos and ensure current assignee has one.
+		Safe to call from API (db_set path) or form save.
+		"""
+		if previous_assignee and previous_assignee != self.assigned_to:
+			self.cancel_open_assignment_todos(previous_assignee)
+		self.create_assignment_todo()
+
+	def sync_assignment_todos_after_save(self):
+		"""Form-save path: detect assigned_to change via get_doc_before_save."""
+		before = self.get_doc_before_save()
+		if not before:
+			return
+		previous = before.get("assigned_to")
+		if previous == self.assigned_to:
+			return
+		self.sync_assignment_todos(previous_assignee=previous)

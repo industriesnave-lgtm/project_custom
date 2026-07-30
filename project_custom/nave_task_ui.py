@@ -31,7 +31,11 @@ DASHBOARD_COUNTER_VIEWS = {
 	"completed": {"view": "all_tasks", "status": "Completed"},
 	"due_today": {"view": "all_tasks", "due_preset": "today"},
 	"due_within_7_days": {"view": "all_tasks", "due_preset": "week"},
-	"recently_updated": {"view": "all_tasks", "due_preset": None},
+	"recently_updated": {
+		"view": "all_tasks",
+		"due_preset": None,
+		"modified_preset": "last_7_days",
+	},
 }
 
 

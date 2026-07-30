@@ -321,6 +321,7 @@ class TestActionRulesWithMocks(unittest.TestCase):
 			"db_set": MagicMock(),
 			"reload": MagicMock(),
 			"create_assignment_todo": MagicMock(),
+			"sync_assignment_todos": MagicMock(),
 			"as_dict": MagicMock(
 				return_value={
 					"name": "NT-2026-00001",
@@ -431,8 +432,60 @@ class TestActionRulesWithMocks(unittest.TestCase):
 
 		self.assertTrue(result["ok"])
 		self.assertEqual(result["assigned_to"], "other@example.com")
+		task.sync_assignment_todos.assert_called_once_with(
+			previous_assignee="emp@example.com"
+		)
 
-	def test_close_permission_denied_for_assignee(self):
+	def test_modified_after_filter_applied(self):
+		filters = self.api._apply_common_filters({}, modified_after="2026-07-22")
+		self.assertIn(["modified", ">=", "2026-07-22 00:00:00"], filters)
+
+	def test_modified_after_preserves_datetime(self):
+		filters = self.api._apply_common_filters(
+			{},
+			modified_after="2026-07-22 00:00:00",
+		)
+		self.assertIn(["modified", ">=", "2026-07-22 00:00:00"], filters)
+
+	def test_recently_updated_cutoff_helper(self):
+		with patch.object(self.api, "add_days", side_effect=lambda d, n: f"shifted:{d}:{n}"):
+			cutoff = self.api.recently_updated_modified_after("2026-07-29")
+		self.assertEqual(cutoff, "shifted:2026-07-29:-7 00:00:00")
+
+	def test_dashboard_returns_recently_updated_cutoff(self):
+		self.frappe.session.user = "emp@example.com"
+		self.frappe.get_roles = lambda user=None: ["Employee"]
+
+		with (
+			patch.object(self.api, "_permission_aware_count", return_value=0),
+			patch.object(
+				self.api,
+				"recently_updated_modified_after",
+				return_value="2026-07-22 00:00:00",
+			),
+		):
+			result = self.api.get_dashboard_counts()
+
+		self.assertEqual(
+			result["recently_updated_modified_after"],
+			"2026-07-22 00:00:00",
+		)
+
+	def test_get_all_tasks_passes_modified_after(self):
+		self.frappe.session.user = "emp@example.com"
+		captured = {}
+
+		def fake_list_tasks(filters, **kwargs):
+			captured["filters"] = filters
+			return {"page": 1, "page_length": 20, "total": 0, "data": []}
+
+		with patch.object(self.api, "_list_tasks", side_effect=fake_list_tasks):
+			self.api.get_all_tasks(modified_after="2026-07-22 00:00:00")
+
+		self.assertIn(
+			["modified", ">=", "2026-07-22 00:00:00"],
+			captured["filters"],
+		)
 		self.frappe.session.user = "emp@example.com"
 		self.frappe.get_roles = lambda user=None: ["Employee"]
 		task = self._task()
@@ -515,6 +568,90 @@ class TestSchedulerRegistration(unittest.TestCase):
 			"project_custom.api.nave_task.run_daily_nave_task_jobs",
 			text,
 		)
+
+
+class TestAssignmentTodoSync(unittest.TestCase):
+	def setUp(self):
+		self.frappe = _install_fake_frappe()
+		self.frappe.session.user = "creator@example.com"
+		self.frappe.get_all = MagicMock(return_value=["TODO-OLD-1"])
+		self.frappe.db.set_value = MagicMock()
+		self.frappe.db.exists = MagicMock(return_value=False)
+		self.frappe.get_doc = MagicMock(
+			return_value=types.SimpleNamespace(insert=MagicMock())
+		)
+
+		import importlib
+
+		import project_custom.project_custom.doctype.nave_task.nave_task as nave_task_mod
+
+		importlib.reload(nave_task_mod)
+		self.NAVETask = nave_task_mod.NAVETask
+
+	def _doc(self, *, assigned_to="new@example.com", name="NT-2026-00001"):
+		doc = self.NAVETask.__new__(self.NAVETask)
+		doc.name = name
+		doc.doctype = "NAVE Task"
+		doc.assigned_to = assigned_to
+		doc.assigned_by = "creator@example.com"
+		doc.subject = "Sync test"
+		doc.due_date = "2026-07-30"
+		doc.priority = "Medium"
+		return doc
+
+	def test_cancel_open_assignment_todos(self):
+		doc = self._doc()
+		cancelled = doc.cancel_open_assignment_todos("old@example.com")
+		self.assertEqual(cancelled, 1)
+		self.frappe.db.set_value.assert_called_once_with(
+			"ToDo",
+			"TODO-OLD-1",
+			"status",
+			"Cancelled",
+			update_modified=False,
+		)
+
+	def test_sync_cancels_previous_and_creates_new(self):
+		doc = self._doc(assigned_to="new@example.com")
+		doc.cancel_open_assignment_todos = MagicMock(return_value=1)
+		doc.create_assignment_todo = MagicMock()
+		doc.sync_assignment_todos(previous_assignee="old@example.com")
+		doc.cancel_open_assignment_todos.assert_called_once_with("old@example.com")
+		doc.create_assignment_todo.assert_called_once()
+
+	def test_sync_skips_cancel_when_assignee_unchanged(self):
+		doc = self._doc(assigned_to="same@example.com")
+		doc.cancel_open_assignment_todos = MagicMock()
+		doc.create_assignment_todo = MagicMock()
+		doc.sync_assignment_todos(previous_assignee="same@example.com")
+		doc.cancel_open_assignment_todos.assert_not_called()
+		doc.create_assignment_todo.assert_called_once()
+
+	def test_form_save_sync_uses_before_save(self):
+		doc = self._doc(assigned_to="new@example.com")
+		doc.get_doc_before_save = MagicMock(
+			return_value=types.SimpleNamespace(get=lambda k: "old@example.com")
+		)
+		doc.sync_assignment_todos = MagicMock()
+		doc.sync_assignment_todos_after_save()
+		doc.sync_assignment_todos.assert_called_once_with(
+			previous_assignee="old@example.com"
+		)
+
+	def test_form_save_sync_noop_when_unchanged(self):
+		doc = self._doc(assigned_to="same@example.com")
+		doc.get_doc_before_save = MagicMock(
+			return_value=types.SimpleNamespace(get=lambda k: "same@example.com")
+		)
+		doc.sync_assignment_todos = MagicMock()
+		doc.sync_assignment_todos_after_save()
+		doc.sync_assignment_todos.assert_not_called()
+
+	def test_create_assignment_todo_skips_duplicate(self):
+		doc = self._doc()
+		self.frappe.db.exists = MagicMock(return_value="TODO-EXISTING")
+		doc.create_assignment_todo()
+		self.frappe.get_doc.assert_not_called()
 
 
 if __name__ == "__main__":

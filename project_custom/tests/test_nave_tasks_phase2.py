@@ -56,6 +56,11 @@ class TestViewApiMapping(unittest.TestCase):
 		self.assertEqual(DASHBOARD_COUNTER_VIEWS["overdue"]["view"], "overdue_tasks")
 		self.assertEqual(DASHBOARD_COUNTER_VIEWS["open"]["status"], "Open")
 		self.assertEqual(DASHBOARD_COUNTER_VIEWS["completed"]["status"], "Completed")
+		self.assertEqual(
+			DASHBOARD_COUNTER_VIEWS["recently_updated"]["modified_preset"],
+			"last_7_days",
+		)
+		self.assertEqual(DASHBOARD_COUNTER_VIEWS["recently_updated"]["view"], "all_tasks")
 
 
 class TestAllTasksVisibility(unittest.TestCase):
@@ -162,6 +167,9 @@ class TestBrandingAndAssets(unittest.TestCase):
 		self.assertIn("get_dashboard_counts", js)
 		self.assertIn("get_task_timeline", js)
 		self.assertIn("page_length", js)
+		self.assertIn("modified_after", js)
+		self.assertIn("_modified_after", js)
+		self.assertIn("recently_updated", js)
 
 	def test_css_file_exists(self):
 		css = WORKSPACE / "project_custom" / "public" / "css" / "nave_tasks.css"
