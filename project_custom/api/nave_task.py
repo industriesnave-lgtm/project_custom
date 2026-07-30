@@ -14,6 +14,7 @@ from project_custom.nave_task_utils import (
 	user_can_access_task,
 	user_can_manage_task,
 	user_can_submit_progress_update,
+	user_has_nave_task_app_access,
 )
 from project_custom.permissions.nave_task import user_can_see_internal_notes
 
@@ -94,6 +95,22 @@ def is_task_manager(user=None):
 def require_login():
 	if frappe.session.user == "Guest":
 		frappe.throw("Please log in.", frappe.PermissionError)
+
+
+def require_nave_task_app_role(user=None):
+	"""App-role gate. Does not replace document-level permission checks."""
+	user = user or frappe.session.user
+	if not user_has_nave_task_app_access(user, frappe.get_roles(user)):
+		frappe.throw(
+			"You do not have permission to access NAVE Tasks.",
+			frappe.PermissionError,
+		)
+
+
+def require_nave_task_access():
+	"""Shared guard for all whitelisted NAVE Task APIs (login + app role)."""
+	require_login()
+	require_nave_task_app_role()
 
 
 def get_employee(user=None):
@@ -347,7 +364,10 @@ def _list_tasks(
 
 @frappe.whitelist()
 def has_app_permission():
-	return frappe.session.user != "Guest"
+	user = frappe.session.user
+	if user == "Guest":
+		return False
+	return user_has_nave_task_app_access(user, frappe.get_roles(user))
 
 
 @frappe.whitelist()
@@ -364,7 +384,7 @@ def get_my_tasks(
 	search=None,
 ):
 	"""Tasks assigned to the current user."""
-	require_login()
+	require_nave_task_access()
 	filters = _apply_common_filters(
 		{"assigned_to": frappe.session.user},
 		status=status,
@@ -394,7 +414,7 @@ def get_tasks_created_by_me(
 	search=None,
 ):
 	"""Tasks created by the current user (owner or assigned_by)."""
-	require_login()
+	require_nave_task_access()
 	user = frappe.session.user
 	filters = _apply_common_filters(
 		{},
@@ -436,7 +456,7 @@ def get_all_tasks(
 	search=None,
 ):
 	"""All tasks visible to the current user via permission hooks."""
-	require_login()
+	require_nave_task_access()
 	or_filters = None
 	filters = _apply_common_filters(
 		{},
@@ -474,7 +494,7 @@ def get_overdue_tasks(
 	creator=None,
 	search=None,
 ):
-	require_login()
+	require_nave_task_access()
 	or_filters = None
 	filters = _apply_common_filters(
 		{"is_overdue": 1},
@@ -508,7 +528,7 @@ def get_task_updates_list(
 	update_by=None,
 ):
 	"""Paginated NAVE Task Update list scoped by permission hooks."""
-	require_login()
+	require_nave_task_access()
 	page, page_length, start = _parse_page(page, page_length)
 	filters = {}
 	if task:
@@ -549,7 +569,7 @@ def get_task_updates_list(
 @frappe.whitelist()
 def get_dashboard_counts():
 	"""Permission-aware dashboard counters for the current user."""
-	require_login()
+	require_nave_task_access()
 	today = nowdate()
 	week = add_days(today, 7)
 	recent_modified_after = recently_updated_modified_after(today)
@@ -586,7 +606,7 @@ def get_dashboard_counts():
 @frappe.whitelist()
 def get_task_timeline(task_name):
 	"""Permanent chronological timeline for one task."""
-	require_login()
+	require_nave_task_access()
 	task = get_task_for_user(task_name)
 
 	filters = {"task": task.name}
@@ -675,7 +695,7 @@ def submit_update(
 	support_required=None,
 	attachment=None,
 ):
-	require_login()
+	require_nave_task_access()
 	user = frappe.session.user
 	task = get_task_for_user(task_name, user)
 
@@ -784,7 +804,7 @@ def post_task_message(
 	Supports Reply / Progress Update / Clarification Required /
 	Completion Update / Manager Instruction / Internal Note.
 	"""
-	require_login()
+	require_nave_task_access()
 	user = frappe.session.user
 	task = get_task_for_user(task_name, user)
 
@@ -886,7 +906,7 @@ def post_task_message(
 
 @frappe.whitelist()
 def reassign_task(task_name, assigned_to, note=None):
-	require_login()
+	require_nave_task_access()
 	user = frappe.session.user
 	# Actor is always the session user — never trust browser-supplied user IDs.
 	task = get_task_for_user(task_name, user)
@@ -957,7 +977,7 @@ def reassign_task(task_name, assigned_to, note=None):
 
 @frappe.whitelist()
 def close_task(task_name, remarks=None):
-	require_login()
+	require_nave_task_access()
 	user = frappe.session.user
 	task = get_task_for_user(task_name, user)
 
@@ -1072,7 +1092,7 @@ def get_recurring_tasks(
 	search=None,
 ):
 	"""List recurring templates visible to the current user."""
-	require_login()
+	require_nave_task_access()
 	page, page_length, start = _parse_page(page, page_length)
 	filters = [["is_recurring", "=", 1]]
 	if frequency:
@@ -1104,7 +1124,7 @@ def get_recurring_tasks(
 
 @frappe.whitelist()
 def get_generated_tasks(template_name, page=1, page_length=20):
-	require_login()
+	require_nave_task_access()
 	template = get_task_for_user(template_name)
 	page, page_length, start = _parse_page(page, page_length)
 	filters = {"generated_from": template.name}
@@ -1129,7 +1149,7 @@ def get_generated_tasks(template_name, page=1, page_length=20):
 
 @frappe.whitelist()
 def enable_recurring_task(task_name):
-	require_login()
+	require_nave_task_access()
 	user = frappe.session.user
 	task = get_task_for_user(task_name, user)
 	if not can_manage_task_doc(task, user):
@@ -1151,7 +1171,7 @@ def enable_recurring_task(task_name):
 
 @frappe.whitelist()
 def disable_recurring_task(task_name):
-	require_login()
+	require_nave_task_access()
 	user = frappe.session.user
 	task = get_task_for_user(task_name, user)
 	if not can_manage_task_doc(task, user):
@@ -1180,7 +1200,7 @@ def generate_recurring_task_now(task_name, occurrence_date=None):
 	Manual Generate Now.
 	Uses duplicate-prevention; defaults to next_creation_date or today.
 	"""
-	require_login()
+	require_nave_task_access()
 	user = frappe.session.user
 	task = get_task_for_user(task_name, user)
 	if not can_manage_task_doc(task, user):

@@ -10,6 +10,31 @@ ACTIVE_STATUSES = ("Open", "Working", "Pending")
 
 MANAGER_ROLE = "NAVE Task Manager"
 DIRECTOR_ROLE = "NAVE Task Director"
+EMPLOYEE_ROLE = "Employee"
+SYSTEM_MANAGER_ROLE = "System Manager"
+
+# Roles allowed to open the NAVE Tasks app/page and call its whitelisted APIs.
+# Document-level visibility still applies after this gate.
+NAVE_TASK_APP_ROLES = frozenset(
+	{
+		EMPLOYEE_ROLE,
+		MANAGER_ROLE,
+		DIRECTOR_ROLE,
+		SYSTEM_MANAGER_ROLE,
+	}
+)
+
+
+def user_has_nave_task_app_access(user: str | None, roles) -> bool:
+	"""
+	App/page/API gate only. Does not grant document access by itself.
+	Administrator is always allowed; Guest is never allowed.
+	"""
+	if not user or user == "Guest":
+		return False
+	if user == "Administrator":
+		return True
+	return bool(set(roles or []) & NAVE_TASK_APP_ROLES)
 
 UPDATE_TYPES = (
 	"Progress Update",

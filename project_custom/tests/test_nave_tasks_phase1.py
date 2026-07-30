@@ -87,6 +87,7 @@ from project_custom.nave_task_utils import (  # noqa: E402
 	user_can_access_task,
 	user_can_manage_task,
 	user_can_submit_progress_update,
+	user_has_nave_task_app_access,
 )
 
 
@@ -652,6 +653,121 @@ class TestAssignmentTodoSync(unittest.TestCase):
 		self.frappe.db.exists = MagicMock(return_value="TODO-EXISTING")
 		doc.create_assignment_todo()
 		self.frappe.get_doc.assert_not_called()
+
+
+class TestNaveTaskAppAccessHelper(unittest.TestCase):
+	def test_guest_denied(self):
+		self.assertFalse(user_has_nave_task_app_access("Guest", ["Employee"]))
+		self.assertFalse(user_has_nave_task_app_access(None, ["Employee"]))
+
+	def test_employee_allowed(self):
+		self.assertTrue(user_has_nave_task_app_access("emp@example.com", ["Employee"]))
+
+	def test_manager_allowed(self):
+		self.assertTrue(
+			user_has_nave_task_app_access("mgr@example.com", ["NAVE Task Manager"])
+		)
+
+	def test_director_allowed(self):
+		self.assertTrue(
+			user_has_nave_task_app_access("dir@example.com", ["NAVE Task Director"])
+		)
+
+	def test_system_manager_allowed(self):
+		self.assertTrue(
+			user_has_nave_task_app_access("admin@example.com", ["System Manager"])
+		)
+
+	def test_administrator_allowed(self):
+		self.assertTrue(user_has_nave_task_app_access("Administrator", []))
+
+	def test_random_desk_role_denied(self):
+		self.assertFalse(
+			user_has_nave_task_app_access("sales@example.com", ["Sales User", "Accounts User"])
+		)
+
+
+class TestAppPermissionAndApiRoleGuard(unittest.TestCase):
+	def setUp(self):
+		self.frappe = _install_fake_frappe()
+		import importlib
+
+		import project_custom.api.nave_task as api
+
+		importlib.reload(api)
+		self.api = api
+
+	def test_has_app_permission_guest_denied(self):
+		self.frappe.session.user = "Guest"
+		self.frappe.get_roles = lambda user=None: []
+		self.assertFalse(self.api.has_app_permission())
+
+	def test_has_app_permission_employee_allowed(self):
+		self.frappe.session.user = "emp@example.com"
+		self.frappe.get_roles = lambda user=None: ["Employee"]
+		self.assertTrue(self.api.has_app_permission())
+
+	def test_has_app_permission_manager_allowed(self):
+		self.frappe.session.user = "mgr@example.com"
+		self.frappe.get_roles = lambda user=None: ["NAVE Task Manager"]
+		self.assertTrue(self.api.has_app_permission())
+
+	def test_has_app_permission_director_allowed(self):
+		self.frappe.session.user = "dir@example.com"
+		self.frappe.get_roles = lambda user=None: ["NAVE Task Director"]
+		self.assertTrue(self.api.has_app_permission())
+
+	def test_has_app_permission_system_manager_allowed(self):
+		self.frappe.session.user = "sm@example.com"
+		self.frappe.get_roles = lambda user=None: ["System Manager"]
+		self.assertTrue(self.api.has_app_permission())
+
+	def test_has_app_permission_administrator_allowed(self):
+		self.frappe.session.user = "Administrator"
+		self.frappe.get_roles = lambda user=None: []
+		self.assertTrue(self.api.has_app_permission())
+
+	def test_has_app_permission_random_role_denied(self):
+		self.frappe.session.user = "other@example.com"
+		self.frappe.get_roles = lambda user=None: ["Sales User"]
+		self.assertFalse(self.api.has_app_permission())
+
+	def test_api_role_guard_denies_guest(self):
+		self.frappe.session.user = "Guest"
+		self.frappe.get_roles = lambda user=None: []
+		with self.assertRaises(self.frappe.PermissionError):
+			self.api.require_nave_task_access()
+
+	def test_api_role_guard_denies_random_role(self):
+		self.frappe.session.user = "sales@example.com"
+		self.frappe.get_roles = lambda user=None: ["Sales User"]
+		with self.assertRaises(self.frappe.PermissionError):
+			self.api.require_nave_task_access()
+
+	def test_api_role_guard_allows_employee(self):
+		self.frappe.session.user = "emp@example.com"
+		self.frappe.get_roles = lambda user=None: ["Employee"]
+		self.api.require_nave_task_access()  # no raise
+
+	def test_task_level_permission_still_runs_after_role_guard(self):
+		"""Role gate passes, then document-level access is still enforced."""
+		self.frappe.session.user = "emp@example.com"
+		self.frappe.get_roles = lambda user=None: ["Employee"]
+
+		with patch.object(
+			self.api,
+			"get_task_for_user",
+			side_effect=self.frappe.PermissionError("You are not permitted to access this task."),
+		):
+			with self.assertRaises(self.frappe.PermissionError) as ctx:
+				self.api.close_task("NT-2026-00001", "done")
+		self.assertIn("not permitted", str(ctx.exception).lower())
+
+	def test_whitelist_get_my_tasks_blocked_without_app_role(self):
+		self.frappe.session.user = "sales@example.com"
+		self.frappe.get_roles = lambda user=None: ["Sales User"]
+		with self.assertRaises(self.frappe.PermissionError):
+			self.api.get_my_tasks()
 
 
 if __name__ == "__main__":

@@ -171,6 +171,30 @@ class TestBrandingAndAssets(unittest.TestCase):
 		self.assertIn("_modified_after", js)
 		self.assertIn("recently_updated", js)
 
+	def test_nave_tasks_page_roles_restricted(self):
+		import json
+
+		page = json.loads(
+			(
+				WORKSPACE
+				/ "project_custom"
+				/ "project_custom"
+				/ "page"
+				/ "nave_tasks"
+				/ "nave_tasks.json"
+			).read_text()
+		)
+		roles = {row["role"] for row in page.get("roles") or []}
+		self.assertEqual(
+			roles,
+			{
+				"Employee",
+				"NAVE Task Manager",
+				"NAVE Task Director",
+				"System Manager",
+			},
+		)
+
 	def test_css_file_exists(self):
 		css = WORKSPACE / "project_custom" / "public" / "css" / "nave_tasks.css"
 		self.assertTrue(css.exists())
