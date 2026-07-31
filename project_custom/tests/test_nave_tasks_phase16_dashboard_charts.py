@@ -133,6 +133,23 @@ class TestChartAccess(unittest.TestCase):
 			get_dashboard_chart("pie_of_secrets", user="emp@example.com", today=TODAY)
 		self.assertIn("Unsupported chart type", str(ctx.exception))
 
+	def test_json_string_filters_from_desk_rpc(self):
+		"""Desk frappe.call sends filters as a JSON string — must not crash dict()."""
+		with patch(
+			"project_custom.nave_task_dashboard._fetch_period_report_rows",
+			return_value=[],
+		):
+			payload = get_dashboard_chart(
+				"monthly_trend",
+				'{"from_date":"2026-01-01","to_date":"2026-07-31"}',
+				user="mgr@example.com",
+				today=TODAY,
+			)
+		self.assertEqual(payload["chart_type"], "monthly_trend")
+		self.assertEqual(payload["meta"]["filters"]["from_date"], "2026-01-01")
+		self.assertEqual(payload["meta"]["filters"]["to_date"], "2026-07-31")
+		self.assertTrue(isinstance(payload["labels"], list))
+
 	def test_assigned_to_cannot_bypass(self):
 		captured = {}
 

@@ -75,12 +75,26 @@ def _today(today=None) -> date:
 
 
 def report_filters_dict(filters) -> dict:
-	"""Convert Script Report filters (_dict / dict) to a plain dict."""
+	"""Convert Script Report / API filters (_dict / dict / JSON str) to a plain dict.
+
+	Desk RPC often passes filters as a JSON string. Calling dict() on a string
+	raises ValueError ("dictionary update sequence element #0 has length 1").
+	"""
 	if not filters:
 		return {}
+	if isinstance(filters, str):
+		parse_json = getattr(frappe, "parse_json", None)
+		if callable(parse_json):
+			filters = parse_json(filters) or {}
+		else:
+			import json
+
+			filters = json.loads(filters) if filters.strip() else {}
 	if hasattr(filters, "items"):
 		return {k: v for k, v in filters.items() if v not in (None, "")}
-	return dict(filters)
+	# Refuse opaque sequences (e.g. list of field names) that dict() would misread.
+	frappe.throw("Report filters must be a dictionary.", frappe.ValidationError)
+
 
 
 def days_overdue(due_date, status, today=None) -> int:
