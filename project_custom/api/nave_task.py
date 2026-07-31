@@ -2,6 +2,8 @@ import frappe
 from frappe.utils import add_days, cint, flt, now_datetime, nowdate
 
 from project_custom.nave_task_notifications import (
+	EVENT_ASSIGNED,
+	EVENT_MESSAGE,
 	EVENT_REASSIGNED,
 	notify_nave_task_event,
 	notify_status_change,
@@ -175,7 +177,11 @@ def get_employee(user=None):
 
 def get_user_department(user=None):
 	employee = get_employee(user)
-	return employee.department if employee else None
+	if not employee:
+		return None
+	if isinstance(employee, dict):
+		return employee.get("department")
+	return getattr(employee, "department", None)
 
 
 def get_user_full_name(user=None):
@@ -348,8 +354,13 @@ def build_conversation_timeline(rows, task=None, viewer=None):
 
 
 def serialize_task(task_row):
-	if hasattr(task_row, "as_dict"):
-		row = task_row.as_dict()
+	# frappe._dict implements __getattr__ so hasattr(..., "as_dict") is True even
+	# when the key is missing (returns None). Calling that None crashes All Tasks.
+	as_dict = getattr(task_row, "as_dict", None)
+	if callable(as_dict):
+		row = as_dict()
+	elif isinstance(task_row, dict):
+		row = dict(task_row)
 	else:
 		row = dict(task_row)
 
@@ -646,42 +657,119 @@ def get_task_updates_list(
 	status=None,
 	update_by=None,
 ):
-	"""Paginated NAVE Task Update list scoped by permission hooks."""
+	"""
+	One card per task: latest visible update for each permitted task.
+	Conversation history stays inside the task detail view.
+	"""
 	require_nave_task_access()
 	page, page_length, start = _parse_page(page, page_length)
-	filters = {}
-	if task:
-		filters["task"] = task
-	if update_type:
-		if update_type == INTERNAL_NOTE_TYPE and not user_can_see_internal_notes():
-			frappe.throw(
-				"You are not permitted to view Internal Notes.",
-				frappe.PermissionError,
-			)
-		filters["update_type"] = update_type
-	elif not user_can_see_internal_notes():
-		filters["update_type"] = ["!=", INTERNAL_NOTE_TYPE]
-	if status:
-		filters["status"] = status
-	if update_by:
-		filters["update_by"] = update_by
 
-	rows = frappe.get_list(
-		"NAVE Task Update",
-		filters=filters,
-		fields=_update_list_fields(),
-		order_by="updated_on desc",
+	task_filters = _as_filter_list({})
+	if task:
+		task_filters.append(["name", "=", task])
+	# Tasks with recorded activity (latest_update is maintained by conversation APIs).
+	task_filters.append(["latest_update", "!=", ""])
+
+	tasks = frappe.get_list(
+		"NAVE Task",
+		filters=task_filters,
+		fields=[
+			"name",
+			"subject",
+			"status",
+			"priority",
+			"latest_update",
+			"modified",
+			"assigned_to",
+			"assigned_by",
+			"owner",
+			"department",
+			"progress",
+		],
+		order_by="modified desc",
 		limit_start=start,
 		limit_page_length=page_length,
 		ignore_permissions=False,
 	)
-	total = _permission_aware_count("NAVE Task Update", filters)
+	total = _permission_aware_count("NAVE Task", task_filters)
+
+	data = []
+	for task_row in tasks:
+		task_name = (
+			task_row.get("name")
+			if isinstance(task_row, dict)
+			else getattr(task_row, "name", None)
+		)
+		task_subject = (
+			task_row.get("subject")
+			if isinstance(task_row, dict)
+			else getattr(task_row, "subject", None)
+		)
+		task_latest = (
+			task_row.get("latest_update")
+			if isinstance(task_row, dict)
+			else getattr(task_row, "latest_update", None)
+		)
+		task_modified = (
+			task_row.get("modified")
+			if isinstance(task_row, dict)
+			else getattr(task_row, "modified", None)
+		)
+		task_status = (
+			task_row.get("status")
+			if isinstance(task_row, dict)
+			else getattr(task_row, "status", None)
+		)
+		task_progress = (
+			task_row.get("progress")
+			if isinstance(task_row, dict)
+			else getattr(task_row, "progress", None)
+		)
+		update_filters = {"task": task_name}
+		if update_type:
+			if update_type == INTERNAL_NOTE_TYPE and not user_can_see_internal_notes():
+				frappe.throw(
+					"You are not permitted to view Internal Notes.",
+					frappe.PermissionError,
+				)
+			update_filters["update_type"] = update_type
+		elif not user_can_see_internal_notes():
+			update_filters["update_type"] = ["!=", INTERNAL_NOTE_TYPE]
+		if status:
+			update_filters["status"] = status
+		if update_by:
+			update_filters["update_by"] = update_by
+
+		latest_rows = frappe.get_list(
+			"NAVE Task Update",
+			filters=update_filters,
+			fields=_update_list_fields(),
+			order_by="updated_on desc, creation desc",
+			limit_page_length=1,
+			ignore_permissions=False,
+		)
+		if latest_rows:
+			item = enrich_timeline_item(latest_rows[0], task_row)
+		else:
+			item = {
+				"task": task_name,
+				"update_text": task_latest,
+				"updated_on": task_modified,
+				"update_by": None,
+				"update_type": "Progress Update",
+				"status": task_status,
+				"progress": task_progress,
+				"attachment": None,
+			}
+			item = enrich_timeline_item(item, task_row)
+		item["task_subject"] = task_subject
+		data.append(item)
 
 	return {
 		"page": page,
 		"page_length": page_length,
 		"total": total,
-		"data": [enrich_timeline_item(row) for row in rows],
+		"data": data,
 	}
 
 
@@ -756,16 +844,14 @@ def get_task_timeline(task_name):
 		for row in flat
 	]
 
+	allowed_types = _allowed_conversation_types_for_user(task, viewer)
+
 	return {
 		"task": serialize_task(task),
 		"timeline": timeline,
 		"timeline_flat": timeline_flat,
 		"can_post_internal_note": user_can_see_internal_notes(),
-		"allowed_update_types": list(
-			t
-			for t in CONVERSATION_UPDATE_TYPES
-			if t != INTERNAL_NOTE_TYPE or user_can_see_internal_notes()
-		),
+		"allowed_update_types": allowed_types,
 		"allowed_next_statuses": get_allowed_next_statuses(
 			task.status,
 			is_manager_level=session_is_manager_level() and can_manage_task_doc(task),
@@ -778,6 +864,26 @@ def get_task_timeline(task_name):
 			and task.status in ("Completed", "Closed")
 		),
 	}
+
+
+def _allowed_conversation_types_for_user(task, user=None):
+	"""
+	Creator and assignee both get Reply / Clarification.
+	Progress/Completion stay assignee-or-manager gated (unchanged permission rules).
+	"""
+	user = user or frappe.session.user
+	types = ["Reply", "Clarification Required"]
+	if can_submit_progress_on_task(task, user):
+		types.extend(["Progress Update", "Completion Update"])
+	elif can_manage_task_doc(task, user):
+		types.append("Completion Update")
+	if is_admin(user) or is_task_director(user) or is_task_manager(user):
+		types.append("Manager Instruction")
+	if user_can_see_internal_notes(user):
+		types.append(INTERNAL_NOTE_TYPE)
+	# Preserve CONVERSATION_UPDATE_TYPES order when present.
+	ordered = [t for t in CONVERSATION_UPDATE_TYPES if t in types]
+	return ordered or types
 
 
 def _create_history_entry(
@@ -793,11 +899,18 @@ def _create_history_entry(
 	parent_update=None,
 ):
 	employee = get_employee()
+	employee_name = None
+	if employee:
+		employee_name = (
+			employee.get("name")
+			if isinstance(employee, dict)
+			else getattr(employee, "name", None)
+		)
 	payload = {
 		"doctype": "NAVE Task Update",
 		"task": task.name,
 		"update_by": frappe.session.user,
-		"employee": employee.name if employee else None,
+		"employee": employee_name,
 		"updated_on": now_datetime(),
 		"update_type": update_type,
 		"status": status or task.status,
@@ -1129,8 +1242,18 @@ def post_task_message(
 				field_updates.get("status"),
 				actor=user,
 			)
-	elif update_type != INTERNAL_NOTE_TYPE:
-		task.db_set("latest_update", message.strip(), update_modified=True)
+			status_notified = True
+		else:
+			status_notified = False
+	else:
+		status_notified = False
+		if update_type != INTERNAL_NOTE_TYPE:
+			task.db_set("latest_update", message.strip(), update_modified=True)
+
+	# In-app + email for conversation messages (Reply / Progress / etc.).
+	# Status transitions already notify above; avoid a second ping for those.
+	if update_type not in (INTERNAL_NOTE_TYPE, "System") and not status_notified:
+		notify_nave_task_event(task, EVENT_MESSAGE, actor=user)
 
 	final_status = field_updates.get("status", new_status)
 	final_progress = field_updates.get("progress", new_progress)
@@ -1434,6 +1557,9 @@ def create_task(
 	# Employees lack DocType create; API validates then inserts with ignore_permissions.
 	doc = frappe.get_doc(payload)
 	doc.insert(ignore_permissions=True)
+
+	# Ensure assignment notification (in-app + email). Deduped if after_insert already fired.
+	notify_nave_task_event(doc, EVENT_ASSIGNED, actor=actor)
 
 	# Keep attachment on the conversation timeline even without a task-level field.
 	if attachment:

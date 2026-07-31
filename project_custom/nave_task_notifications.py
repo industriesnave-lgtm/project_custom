@@ -39,6 +39,7 @@ EVENT_REASSIGNED = "reassigned"
 EVENT_COMPLETED = "completed"
 EVENT_REOPENED = "reopened"
 EVENT_CLOSED = "closed"
+EVENT_MESSAGE = "message"
 
 # Variant keys for reassignment recipient groups (dedupe independently).
 VARIANT_NEW_ASSIGNEE = "new"
@@ -222,6 +223,20 @@ def _dispatch(task, event: str, *, actor: str | None, previous_assignee: str | N
 			actor=actor,
 			action="Task closed",
 			subject_template="Task Closed: {title}",
+		)
+		return
+
+	if event == EVENT_MESSAGE:
+		# Conversation Reply / Progress / Clarification / Completion Update / Manager Instruction.
+		recipients = _assignee_and_creator(task, actor=actor, exclude_actor=True)
+		_notify_recipients(
+			task,
+			event,
+			recipients,
+			actor=actor,
+			action="New task message",
+			subject_template="Task Message: {title}",
+			variant="conversation",
 		)
 		return
 

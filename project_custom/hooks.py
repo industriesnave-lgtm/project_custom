@@ -51,6 +51,9 @@ website_redirects = [
 	{"source": "/app/nave-task-dashboard", "target": "/app/nave-tasks"},
 	{"source": "/desk/nave-task-dashboard", "target": "/desk/nave-tasks"},
 ]
+
+# Strip legacy page from Awesome Bar / boot page_info (Administrator still gets all roles).
+extend_bootinfo = "project_custom.boot.extend_bootinfo"
 # Includes in <head>
 # ------------------
 

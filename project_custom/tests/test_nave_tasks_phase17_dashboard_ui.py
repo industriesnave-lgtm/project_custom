@@ -113,7 +113,8 @@ class TestPageRouteAndConfig(unittest.TestCase):
 		page = json.loads(PAGE_JSON.read_text(encoding="utf-8"))
 		self.assertEqual(page["name"], "nave-task-dashboard")
 		self.assertEqual(page["page_name"], "nave-task-dashboard")
-		self.assertEqual(page["title"], "NAVE Task Dashboard")
+		self.assertEqual(page["title"], "NAVE Tasks Redirect")
+		self.assertEqual(page.get("system_page"), 1)
 		self.assertEqual(page["module"], "Project Custom")
 		self.assertEqual(page["standard"], "Yes")
 

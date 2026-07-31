@@ -114,6 +114,23 @@ frappe.pages["nave-tasks"].on_page_load = function (wrapper) {
 		return false;
 	};
 
+	// Creator and assignee always get conversation reply access (permission rules unchanged).
+	const can_reply_on_task = (task) => {
+		if (task.status === "Cancelled") return false;
+		const user = current_user();
+		if (is_admin() || is_director()) return true;
+		if (task.assigned_to === user) return true;
+		if (task.owner === user || task.assigned_by === user) return true;
+		if (
+			is_manager() &&
+			APP.state.employee_department &&
+			task.department === APP.state.employee_department
+		) {
+			return true;
+		}
+		return false;
+	};
+
 	const allowed_next_statuses = (task) => {
 		const status = task.status || "Open";
 		const manage = can_manage_task(task);
@@ -142,7 +159,7 @@ frappe.pages["nave-tasks"].on_page_load = function (wrapper) {
 		return {
 			open_task: true,
 			view_updates: true,
-			reply: !cancelled,
+			reply: can_reply_on_task(task),
 			submit_update: update && !cancelled && (!closed || (manager_level && manage)),
 			reassign: manage && !cancelled,
 			close_task: manage && completed,
@@ -570,31 +587,33 @@ frappe.pages["nave-tasks"].on_page_load = function (wrapper) {
 		APP.$view.html(`
 			<div class="nt-update-list">
 				${APP.state.items
-					.map(
-						(row) => `
-					<div class="nt-update-row">
+					.map((row) => {
+						const title = row.task_subject || row.task || "Task";
+						const sender =
+							row.sender_full_name || row.update_by || row.employee || "—";
+						const when = row.display_time || row.updated_on || "—";
+						const message = row.update_text || row.latest_update || "";
+						return `
+					<div class="nt-update-row" data-task="${escape(row.task || "")}">
 						<div class="nt-badges">
-							<span class="nt-badge">${escape(row.update_type || "Progress Update")}</span>
-							<span class="nt-badge status-${escape(row.status)}">${escape(row.status || "-")}</span>
+							<span class="nt-badge">${escape(row.update_type || "Update")}</span>
+							<span class="nt-badge status-${escape(row.status)}">${escape(
+							row.status || "-"
+						)}</span>
 						</div>
-						<div><b>Task:</b> ${escape(row.task)}</div>
-						<div><b>By:</b> ${escape(row.update_by || row.employee || "-")}</div>
-						<div><b>When:</b> ${escape(row.updated_on || "-")}</div>
-						<div class="nt-timeline-text" style="margin-top:8px;">${escape(row.update_text || "")}</div>
-						${
-							row.attachment
-								? `<a class="nt-attach-link" href="${escape(
-										row.attachment
-								  )}" target="_blank" rel="noopener">Attachment</a>`
-								: ""
-						}
+						<div class="nt-update-task-title"><b>${escape(title)}</b></div>
+						<div class="nt-update-meta">
+							<span><b>By:</b> ${escape(sender)}</span>
+							<span><b>When:</b> ${escape(when)}</span>
+						</div>
+						<div class="nt-timeline-text" style="margin-top:8px;">${escape(message)}</div>
 						<div style="margin-top:8px;">
 							<button class="btn btn-default btn-sm nt-act" data-act="open" data-task="${escape(
 								row.task
 							)}">Open Task</button>
 						</div>
-					</div>`
-					)
+					</div>`;
+					})
 					.join("")}
 			</div>
 			<div class="nt-load-more-wrap" style="text-align:center;margin-top:14px;"></div>
