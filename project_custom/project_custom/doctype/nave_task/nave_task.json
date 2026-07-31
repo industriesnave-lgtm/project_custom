@@ -43,6 +43,7 @@
     "latest_update",
     "pending_reason",
     "support_required",
+    "attachment",
     "completion_remarks",
     "completion_attachment"
   ],
@@ -293,6 +294,11 @@
       "fieldtype": "Small Text",
       "label": "Support Required",
       "read_only": 1
+    },
+    {
+      "fieldname": "attachment",
+      "fieldtype": "Attach",
+      "label": "Attachment"
     },
     {
       "fieldname": "completion_remarks",

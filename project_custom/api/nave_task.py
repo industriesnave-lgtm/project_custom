@@ -12,14 +12,21 @@ from project_custom.nave_task_utils import (
 	DIRECTOR_ROLE,
 	INTERNAL_NOTE_TYPE,
 	MANAGER_ROLE,
+	NAVE_TASK_APP_ROLES,
+	attachment_kind,
 	build_completion_field_updates,
+	build_progress_chip,
 	build_reopen_field_updates,
 	compute_is_overdue,
+	dump_seen_receipts,
+	format_conversation_time,
 	get_allowed_next_statuses,
 	get_display_role,
 	is_manager_level_user,
+	is_restricted_department,
 	is_reopen_transition,
 	normalize_progress,
+	parse_seen_receipts,
 	to_plain_text,
 	user_can_access_task,
 	user_can_manage_task,
@@ -86,6 +93,23 @@ UPDATE_LIST_FIELDS = [
 	"attachment",
 	"creation",
 ]
+
+UPDATE_OPTIONAL_FIELDS = ("parent_update", "seen_receipts")
+
+
+def _update_list_fields():
+	"""Include conversation columns when present (pre-migrate safe)."""
+	fields = list(UPDATE_LIST_FIELDS)
+	has_column = getattr(frappe.db, "has_column", None)
+	for fieldname in UPDATE_OPTIONAL_FIELDS:
+		try:
+			if callable(has_column) and has_column("NAVE Task Update", fieldname):
+				fields.append(fieldname)
+			elif not callable(has_column):
+				fields.append(fieldname)
+		except Exception:
+			pass
+	return fields
 
 ACTIVE_STATUSES = ("Open", "Working", "Pending")
 
@@ -218,7 +242,7 @@ def get_task_for_user(task_name, user=None):
 	)
 
 
-def enrich_timeline_item(row, task=None):
+def enrich_timeline_item(row, task=None, *, viewer=None, parent_lookup=None):
 	item = dict(row)
 	sender = item.get("update_by") or ""
 	employee_name = None
@@ -236,6 +260,32 @@ def enrich_timeline_item(row, task=None):
 			getattr(task, "assigned_by", None),
 		)
 
+	viewer = viewer or frappe.session.user
+	receipts = parse_seen_receipts(item.get("seen_receipts"))
+	seen_by_others = {
+		user_id: ts for user_id, ts in receipts.items() if user_id and user_id != sender
+	}
+	seen_on = None
+	if seen_by_others:
+		seen_on = sorted(seen_by_others.values())[0]
+
+	parent_update = item.get("parent_update")
+	parent_snippet = None
+	parent_sender_name = None
+	if parent_update and parent_lookup and parent_update in parent_lookup:
+		parent_row = parent_lookup[parent_update]
+		if hasattr(parent_row, "get"):
+			parent_text = parent_row.get("update_text")
+			parent_sender = parent_row.get("update_by") or ""
+		else:
+			parent_text = getattr(parent_row, "update_text", None)
+			parent_sender = getattr(parent_row, "update_by", "") or ""
+		parent_snippet = to_plain_text(parent_text)
+		if len(parent_snippet) > 120:
+			parent_snippet = parent_snippet[:117] + "…"
+		parent_sender_name = get_user_full_name(parent_sender) if parent_sender else ""
+
+	raw_dt = item.get("updated_on") or item.get("creation")
 	item["update_text"] = to_plain_text(item.get("update_text"))
 	item["pending_reason"] = to_plain_text(item.get("pending_reason"))
 	item["update_type"] = item.get("update_type") or "Progress Update"
@@ -248,8 +298,52 @@ def enrich_timeline_item(row, task=None):
 		is_manager=is_task_manager(sender) if sender else False,
 		is_creator=is_creator,
 	)
-	item["datetime"] = item.get("updated_on") or item.get("creation")
+	item["datetime"] = raw_dt
+	item["display_time"] = format_conversation_time(raw_dt)
+	item["is_mine"] = bool(sender and sender == viewer)
+	item["parent_update"] = parent_update
+	item["parent_snippet"] = parent_snippet
+	item["parent_sender_name"] = parent_sender_name
+	item["progress_chip"] = build_progress_chip(
+		item.get("update_type"),
+		item.get("status"),
+		item.get("progress"),
+	)
+	item["attachment_kind"] = attachment_kind(item.get("attachment"))
+	item["seen_by_me"] = viewer in receipts
+	item["seen"] = bool(seen_by_others)
+	item["seen_on"] = seen_on
+	item["seen_display"] = format_conversation_time(seen_on) if seen_on else ""
+	item["delivery_state"] = "seen" if seen_by_others else "sent"
 	return item
+
+
+def build_conversation_timeline(rows, task=None, viewer=None):
+	"""
+	Enrich flat rows into chronological roots with nested replies.
+	Newest remains at the bottom (input order must be ascending).
+	"""
+	viewer = viewer or frappe.session.user
+	by_name = {row.get("name"): row for row in rows if row.get("name")}
+	enriched = [
+		enrich_timeline_item(row, task, viewer=viewer, parent_lookup=by_name) for row in rows
+	]
+	children = {}
+	roots = []
+	for item in enriched:
+		parent = item.get("parent_update")
+		if parent and parent in by_name:
+			children.setdefault(parent, []).append(item)
+		else:
+			# Orphaned parent references still render as roots.
+			item["parent_update"] = parent if parent else None
+			if parent and parent not in by_name:
+				item["parent_snippet"] = item.get("parent_snippet")
+			roots.append(item)
+
+	for root in roots:
+		root["replies"] = children.get(root.get("name"), [])
+	return roots
 
 
 
@@ -264,6 +358,8 @@ def serialize_task(task_row):
 	payload["latest_update"] = to_plain_text(payload.get("latest_update"))
 	payload["is_overdue"] = cint(payload.get("is_overdue"))
 	payload["progress"] = flt(payload.get("progress"))
+	assignee = payload.get("assigned_to")
+	payload["assigned_to_name"] = get_user_full_name(assignee) if assignee else ""
 	return payload
 
 
@@ -573,7 +669,7 @@ def get_task_updates_list(
 	rows = frappe.get_list(
 		"NAVE Task Update",
 		filters=filters,
-		fields=UPDATE_LIST_FIELDS,
+		fields=_update_list_fields(),
 		order_by="updated_on desc",
 		limit_start=start,
 		limit_page_length=page_length,
@@ -631,6 +727,7 @@ def get_task_timeline(task_name):
 	"""Permanent chronological timeline for one task."""
 	require_nave_task_access()
 	task = get_task_for_user(task_name)
+	viewer = frappe.session.user
 
 	filters = {"task": task.name}
 	if not user_can_see_internal_notes():
@@ -639,22 +736,30 @@ def get_task_timeline(task_name):
 	rows = frappe.get_list(
 		"NAVE Task Update",
 		filters=filters,
-		fields=UPDATE_LIST_FIELDS,
+		fields=_update_list_fields(),
 		order_by="updated_on asc, creation asc",
 		limit_page_length=1000,
 		ignore_permissions=False,
 	)
 
 	# Extra hard filter for Internal Notes (defense in depth).
-	timeline = []
+	flat = []
 	for row in rows:
 		if row.get("update_type") == INTERNAL_NOTE_TYPE and not user_can_see_internal_notes():
 			continue
-		timeline.append(enrich_timeline_item(row, task))
+		flat.append(row)
+
+	timeline = build_conversation_timeline(flat, task, viewer=viewer)
+	# Flat enriched list kept for callers that still expect a linear feed.
+	timeline_flat = [
+		enrich_timeline_item(row, task, viewer=viewer, parent_lookup={r.get("name"): r for r in flat})
+		for row in flat
+	]
 
 	return {
 		"task": serialize_task(task),
 		"timeline": timeline,
+		"timeline_flat": timeline_flat,
 		"can_post_internal_note": user_can_see_internal_notes(),
 		"allowed_update_types": list(
 			t
@@ -685,26 +790,34 @@ def _create_history_entry(
 	pending_reason=None,
 	support_required=None,
 	attachment=None,
+	parent_update=None,
 ):
 	employee = get_employee()
-	doc = frappe.get_doc(
-		{
-			"doctype": "NAVE Task Update",
-			"task": task.name,
-			"update_by": frappe.session.user,
-			"employee": employee.name if employee else None,
-			"updated_on": now_datetime(),
-			"update_type": update_type,
-			"status": status or task.status,
-			"progress": flt(progress if progress is not None else task.progress),
-			"update_text": (update_text or "").strip(),
-			"pending_reason": (pending_reason or "").strip(),
-			"support_required": support_required
-			if support_required is not None
-			else task.support_required,
-			"attachment": attachment,
-		}
-	)
+	payload = {
+		"doctype": "NAVE Task Update",
+		"task": task.name,
+		"update_by": frappe.session.user,
+		"employee": employee.name if employee else None,
+		"updated_on": now_datetime(),
+		"update_type": update_type,
+		"status": status or task.status,
+		"progress": flt(progress if progress is not None else task.progress),
+		"update_text": (update_text or "").strip(),
+		"pending_reason": (pending_reason or "").strip(),
+		"support_required": support_required
+		if support_required is not None
+		else task.support_required,
+		"attachment": attachment,
+	}
+	has_column = getattr(frappe.db, "has_column", None)
+	if parent_update and (
+		not callable(has_column) or has_column("NAVE Task Update", "parent_update")
+	):
+		payload["parent_update"] = parent_update
+	if not callable(has_column) or has_column("NAVE Task Update", "seen_receipts"):
+		payload["seen_receipts"] = dump_seen_receipts({})
+
+	doc = frappe.get_doc(payload)
 	doc.insert(ignore_permissions=True)
 	return doc
 
@@ -858,12 +971,13 @@ def submit_update(
 
 
 @frappe.whitelist()
-def reply_to_task(task_name, message, attachment=None):
+def reply_to_task(task_name, message, attachment=None, parent_update=None):
 	return post_task_message(
 		task_name=task_name,
 		message=message,
 		update_type="Reply",
 		attachment=attachment,
+		parent_update=parent_update,
 	)
 
 
@@ -875,11 +989,13 @@ def post_task_message(
 	attachment=None,
 	progress=None,
 	status=None,
+	parent_update=None,
 ):
 	"""
 	Inline conversation composer endpoint.
 	Supports Reply / Progress Update / Clarification Required /
 	Completion Update / Manager Instruction / Internal Note.
+	Optional parent_update creates a threaded reply under that message.
 	"""
 	require_nave_task_access()
 	user = frappe.session.user
@@ -908,6 +1024,20 @@ def post_task_message(
 
 	if task.status == "Cancelled":
 		frappe.throw("Cancelled tasks cannot accept conversation messages.")
+
+	parent_name = (parent_update or "").strip() or None
+	if parent_name:
+		parent_row = frappe.db.get_value(
+			"NAVE Task Update",
+			parent_name,
+			["name", "task", "update_text", "update_by"],
+			as_dict=True,
+		)
+		if not parent_row or parent_row.task != task.name:
+			frappe.throw("Invalid parent message for this task.", frappe.ValidationError)
+		# Thread replies stay conversational; force Reply when nesting.
+		if update_type not in ("Reply", "Clarification Required", INTERNAL_NOTE_TYPE):
+			update_type = "Reply"
 
 	new_status = task.status
 	new_progress = flt(task.progress)
@@ -970,6 +1100,7 @@ def post_task_message(
 		status=field_updates.get("status", new_status),
 		progress=field_updates.get("progress", new_progress),
 		attachment=attachment,
+		parent_update=parent_name,
 	)
 
 	if field_updates:
@@ -1004,11 +1135,16 @@ def post_task_message(
 	final_status = field_updates.get("status", new_status)
 	final_progress = field_updates.get("progress", new_progress)
 
+	parent_lookup = {}
+	if parent_name:
+		parent_lookup[parent_name] = parent_row
+
 	return {
 		"ok": True,
 		"task": task.name,
 		"update": getattr(update, "name", None),
 		"update_type": update_type,
+		"parent_update": parent_name,
 		"timeline_item": enrich_timeline_item(
 			{
 				"name": getattr(update, "name", None),
@@ -1024,9 +1160,306 @@ def post_task_message(
 				"support_required": getattr(update, "support_required", None),
 				"attachment": getattr(update, "attachment", attachment),
 				"creation": getattr(update, "creation", None),
+				"parent_update": parent_name,
+				"seen_receipts": getattr(update, "seen_receipts", "{}"),
 			},
 			task,
+			viewer=user,
+			parent_lookup=parent_lookup,
 		),
+	}
+
+
+@frappe.whitelist()
+def mark_timeline_seen(task_name, update_names=None):
+	"""
+	Mark conversation messages as seen by the current user.
+	Stores per-user seen timestamps on NAVE Task Update.seen_receipts.
+	"""
+	require_nave_task_access()
+	user = frappe.session.user
+	task = get_task_for_user(task_name, user)
+
+	has_column = getattr(frappe.db, "has_column", None)
+	if callable(has_column) and not has_column("NAVE Task Update", "seen_receipts"):
+		return {"ok": True, "marked": 0, "skipped": "column_missing"}
+
+	names = update_names
+	if isinstance(names, str):
+		try:
+			names = frappe.parse_json(names)
+		except Exception:
+			names = [names] if names else None
+	if not names:
+		filters = {"task": task.name, "update_by": ["!=", user]}
+		if not user_can_see_internal_notes():
+			filters["update_type"] = ["!=", INTERNAL_NOTE_TYPE]
+		names = frappe.get_list(
+			"NAVE Task Update",
+			filters=filters,
+			pluck="name",
+			limit_page_length=1000,
+			ignore_permissions=False,
+		)
+
+	now = str(now_datetime())
+	marked = 0
+	for name in names or []:
+		row = frappe.db.get_value(
+			"NAVE Task Update",
+			name,
+			["name", "task", "update_by", "seen_receipts"],
+			as_dict=True,
+		)
+		if not row or row.task != task.name:
+			continue
+		if row.update_by == user:
+			continue
+		receipts = parse_seen_receipts(row.seen_receipts)
+		if user in receipts:
+			continue
+		receipts[user] = now
+		frappe.db.set_value(
+			"NAVE Task Update",
+			name,
+			"seen_receipts",
+			dump_seen_receipts(receipts),
+			update_modified=False,
+		)
+		marked += 1
+
+	return {"ok": True, "marked": marked, "seen_on": now}
+
+
+def _employee_profile(user):
+	if not user:
+		return None
+	return frappe.db.get_value(
+		"Employee",
+		{"user_id": user, "status": "Active"},
+		["name", "department", "company", "employee_name"],
+		as_dict=True,
+	)
+
+
+def _emp_attr(emp, field):
+	"""Read a field from Employee as_dict / _dict / object mocks."""
+	if not emp:
+		return None
+	if isinstance(emp, dict):
+		return emp.get(field)
+	return getattr(emp, field, None)
+
+
+def _assert_assignable_office_user(assignee, *, actor, actor_is_elevated, actor_is_manager, actor_department, actor_company):
+	"""
+	Server-side assignee validation for create/reassign-style assignment.
+	Never trust the client for these checks.
+	"""
+	assignee = (assignee or "").strip()
+	if not assignee:
+		frappe.throw("Assign To is required.", frappe.ValidationError)
+
+	user_row = frappe.db.get_value(
+		"User",
+		assignee,
+		["name", "enabled", "user_type"],
+		as_dict=True,
+	)
+	if not user_row:
+		frappe.throw("Assigned user does not exist.", frappe.ValidationError)
+	if not cint(_emp_attr(user_row, "enabled")):
+		frappe.throw("Cannot assign tasks to a disabled user.", frappe.ValidationError)
+	user_type = _emp_attr(user_row, "user_type")
+	if user_type and user_type != "System User":
+		frappe.throw("Can only assign tasks to office staff users.", frappe.ValidationError)
+
+	roles = frappe.get_roles(assignee)
+	if not user_has_nave_task_app_access(assignee, roles):
+		frappe.throw(
+			"Can only assign tasks to authorized office staff.",
+			frappe.PermissionError,
+		)
+
+	assignee_emp = _employee_profile(assignee)
+	assignee_department = _emp_attr(assignee_emp, "department")
+	assignee_company = _emp_attr(assignee_emp, "company")
+
+	if (
+		not actor_is_elevated
+		and actor_company
+		and assignee_company
+		and actor_company != assignee_company
+	):
+		frappe.throw(
+			"Cannot assign tasks across companies.",
+			frappe.PermissionError,
+		)
+
+	if is_restricted_department(assignee_department) and not actor_is_elevated:
+		# Managers may assign within their own restricted department only.
+		if not (
+			actor_is_manager
+			and actor_department
+			and assignee_department
+			and actor_department == assignee_department
+		):
+			frappe.throw(
+				"You are not permitted to assign tasks in this restricted department.",
+				frappe.PermissionError,
+			)
+
+	return {
+		"user": assignee,
+		"employee": assignee_emp,
+		"department": assignee_department,
+		"company": assignee_company,
+	}
+
+
+@frappe.whitelist()
+def create_task(
+	subject,
+	assigned_to,
+	priority,
+	due_date,
+	description=None,
+	project=None,
+	department=None,
+	attachment=None,
+	company=None,
+):
+	"""
+	Create a NAVE Task from the dashboard for authorized office staff.
+	Validates assignee and department rules on the server.
+	"""
+	require_nave_task_access()
+	actor = frappe.session.user
+
+	subject = (subject or "").strip()
+	assigned_to = (assigned_to or "").strip()
+	priority = (priority or "").strip()
+	due_date = (due_date or "").strip()
+	description = to_plain_text(description).strip() if description else ""
+	project = (project or "").strip() or None
+	department = (department or "").strip() or None
+	attachment = (attachment or "").strip() or None
+	company = (company or "").strip() or None
+
+	if not subject:
+		frappe.throw("Task Title is required.", frappe.ValidationError)
+	if not assigned_to:
+		frappe.throw("Assign To is required.", frappe.ValidationError)
+	if not priority:
+		frappe.throw("Priority is required.", frappe.ValidationError)
+	if priority not in ("Low", "Medium", "High", "Urgent"):
+		frappe.throw("Invalid priority.", frappe.ValidationError)
+	if not due_date:
+		frappe.throw("Due Date is required.", frappe.ValidationError)
+	if not description:
+		description = "-"
+
+	actor_emp = _employee_profile(actor)
+	actor_department = _emp_attr(actor_emp, "department")
+	actor_company = _emp_attr(actor_emp, "company")
+	actor_is_elevated = is_admin(actor) or is_task_director(actor)
+	actor_is_manager = is_task_manager(actor)
+
+	assignee_info = _assert_assignable_office_user(
+		assigned_to,
+		actor=actor,
+		actor_is_elevated=actor_is_elevated,
+		actor_is_manager=actor_is_manager,
+		actor_department=actor_department,
+		actor_company=actor_company,
+	)
+
+	# Explicit department override must also honor restricted-department rules.
+	if department:
+		if is_restricted_department(department) and not actor_is_elevated:
+			if not (
+				actor_is_manager
+				and actor_department
+				and actor_department == department
+			):
+				frappe.throw(
+					"You are not permitted to create tasks for this restricted department.",
+					frappe.PermissionError,
+				)
+	else:
+		department = assignee_info.get("department")
+
+	if not company:
+		company = assignee_info.get("company") or actor_company
+	if not company:
+		# Last resort for Administrator / users without Employee records.
+		company = frappe.db.get_single_value("Global Defaults", "default_company")
+	if not company:
+		frappe.throw(
+			"Company could not be determined for this task. Set the assignee Employee company.",
+			frappe.ValidationError,
+		)
+
+	if project:
+		project_company = frappe.db.get_value("Project", project, "company")
+		if project_company and project_company != company:
+			frappe.throw(
+				"Project belongs to a different company.",
+				frappe.PermissionError,
+			)
+
+	payload = {
+		"doctype": "NAVE Task",
+		"subject": subject,
+		"description": description,
+		"assigned_to": assigned_to,
+		"assigned_by": actor,
+		"priority": priority,
+		"due_date": due_date,
+		"status": "Open",
+		"progress": 0,
+		"department": department,
+		"company": company,
+		"project": project,
+		"start_date": nowdate(),
+	}
+
+	# Optional task-level attachment column (present after migrate).
+	has_column = getattr(frappe.db, "has_column", None)
+	if attachment and (
+		not callable(has_column) or has_column("NAVE Task", "attachment")
+	):
+		payload["attachment"] = attachment
+
+	# Employees lack DocType create; API validates then inserts with ignore_permissions.
+	doc = frappe.get_doc(payload)
+	doc.insert(ignore_permissions=True)
+
+	# Keep attachment on the conversation timeline even without a task-level field.
+	if attachment:
+		_create_history_entry(
+			doc,
+			update_type="System",
+			update_text="Attachment added at task creation.",
+			status=doc.status,
+			progress=doc.progress,
+			attachment=attachment,
+		)
+
+	_create_history_entry(
+		doc,
+		update_type="System",
+		update_text=f"Task created by {get_user_full_name(actor)}.",
+		status=doc.status,
+		progress=doc.progress,
+	)
+
+	return {
+		"ok": True,
+		"task": doc.name,
+		"subject": doc.subject,
+		"assigned_to": doc.assigned_to,
+		"task_row": serialize_task(doc),
 	}
 
 
@@ -1047,8 +1480,15 @@ def reassign_task(task_name, assigned_to, note=None):
 	if not assigned_to:
 		frappe.throw("Please choose a user to reassign the task to.")
 
-	if not frappe.db.exists("User", assigned_to):
-		frappe.throw("Assigned user does not exist.")
+	actor_emp = _employee_profile(user)
+	_assert_assignable_office_user(
+		assigned_to,
+		actor=user,
+		actor_is_elevated=is_admin(user) or is_task_director(user),
+		actor_is_manager=is_task_manager(user),
+		actor_department=_emp_attr(actor_emp, "department"),
+		actor_company=_emp_attr(actor_emp, "company"),
+	)
 
 	if task.status == "Cancelled":
 		frappe.throw("Cancelled tasks cannot be reassigned.")

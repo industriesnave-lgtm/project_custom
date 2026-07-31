@@ -208,7 +208,10 @@ class TestPermissionConditions(unittest.TestCase):
 		)
 		self.assertIn("assigned_to", sql)
 		self.assertIn("owner", sql)
-		self.assertNotIn("`tabNAVE Task`.`department`", sql)
+		# Staff do not get manager department equality; participant path may
+		# reference department only for exact restricted NOT IN gating.
+		self.assertNotIn("`tabNAVE Task`.`department` = 'Sales'", sql)
+		self.assertIn("NOT IN", sql)
 
 	def test_manager_sees_department(self):
 		sql = build_task_permission_condition(

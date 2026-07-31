@@ -11,12 +11,14 @@
     "employee",
     "updated_on",
     "update_type",
+    "parent_update",
     "status",
     "progress",
     "update_text",
     "pending_reason",
     "support_required",
-    "attachment"
+    "attachment",
+    "seen_receipts"
   ],
   "fields": [
     {
@@ -59,6 +61,13 @@
       "options": "Progress Update\nReply\nReassignment\nStatus Change\nClose\nSystem\nRecurrence Event\nClarification Required\nCompletion Update\nManager Instruction\nInternal Note"
     },
     {
+      "description": "Parent message when this row is a thread reply.",
+      "fieldname": "parent_update",
+      "fieldtype": "Link",
+      "label": "Parent Update",
+      "options": "NAVE Task Update"
+    },
+    {
       "fieldname": "status",
       "fieldtype": "Select",
       "in_list_view": 1,
@@ -94,12 +103,19 @@
       "fieldname": "attachment",
       "fieldtype": "Attach",
       "label": "Attachment"
+    },
+    {
+      "description": "JSON map of user_id to seen datetime for read receipts.",
+      "fieldname": "seen_receipts",
+      "fieldtype": "Long Text",
+      "hidden": 1,
+      "label": "Seen Receipts"
     }
   ],
   "index_web_pages_for_search": 0,
   "is_submittable": 0,
   "links": [],
-  "modified": "2026-07-28 00:00:00.000000",
+  "modified": "2026-07-31 19:00:00.000000",
   "modified_by": "Administrator",
   "module": "Project Custom",
   "name": "NAVE Task Update",

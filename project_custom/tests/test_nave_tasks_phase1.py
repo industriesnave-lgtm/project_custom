@@ -423,11 +423,38 @@ class TestActionRulesWithMocks(unittest.TestCase):
 		task = self._task()
 		history = types.SimpleNamespace(name="NTU-2026-00003")
 
+		def get_value(doctype, name=None, fieldname=None, as_dict=False, **kwargs):
+			if doctype == "User":
+				return types.SimpleNamespace(
+					name="other@example.com",
+					enabled=1,
+					user_type="System User",
+				)
+			if doctype == "Employee":
+				filters = name if isinstance(name, dict) else {}
+				user_id = filters.get("user_id")
+				if user_id == "creator@example.com":
+					return types.SimpleNamespace(
+						name="EMP-C",
+						department="Sales",
+						company="Nave Industries",
+						employee_name="Creator",
+					)
+				if user_id == "other@example.com":
+					return types.SimpleNamespace(
+						name="EMP-O",
+						department="Sales",
+						company="Nave Industries",
+						employee_name="Other",
+					)
+				return None
+			return None
+
 		with (
 			patch.object(self.api, "get_task_for_user", return_value=task),
 			patch.object(self.api, "_create_history_entry", return_value=history),
 			patch.object(self.frappe.db, "exists", return_value=True),
-			patch.object(self.frappe.db, "get_value", return_value=None),
+			patch.object(self.frappe.db, "get_value", side_effect=get_value),
 		):
 			result = self.api.reassign_task("NT-2026-00001", "other@example.com", "handover")
 

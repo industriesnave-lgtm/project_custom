@@ -58,16 +58,41 @@ def get_task_query_conditions(user=None):
 
 def has_task_permission(doc, user=None, permission_type=None):
 	user = user or frappe.session.user
+	department = getattr(doc, "department", None)
+	if user_can_access_task(
+		user=user,
+		assigned_to=getattr(doc, "assigned_to", None),
+		owner=getattr(doc, "owner", None),
+		assigned_by=getattr(doc, "assigned_by", None),
+		department=department,
+		is_admin=_is_admin(user),
+		is_director=_is_director(user),
+		is_manager=_is_manager(user),
+		user_department=_employee_department(user),
+	):
+		return True
+
+	# Conversation participant — never unlocks restricted-department tasks alone.
+	task_name = getattr(doc, "name", None)
+	if not task_name:
+		return False
+	is_participant = bool(
+		frappe.db.exists(
+			"NAVE Task Update",
+			{"task": task_name, "update_by": user},
+		)
+	)
 	return user_can_access_task(
 		user=user,
 		assigned_to=getattr(doc, "assigned_to", None),
 		owner=getattr(doc, "owner", None),
 		assigned_by=getattr(doc, "assigned_by", None),
-		department=getattr(doc, "department", None),
+		department=department,
 		is_admin=_is_admin(user),
 		is_director=_is_director(user),
 		is_manager=_is_manager(user),
 		user_department=_employee_department(user),
+		is_participant=is_participant,
 	)
 
 

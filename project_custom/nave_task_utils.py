@@ -24,6 +24,19 @@ NAVE_TASK_APP_ROLES = frozenset(
 	}
 )
 
+# Exact Department.name values that require elevated create/assign and that
+# conversation participation alone must not unlock for list/read access.
+# Match is exact (case-sensitive to Frappe Department name), never substring.
+# Extend this set deliberately when a site adds restricted departments.
+RESTRICTED_DEPARTMENTS = frozenset(
+	{
+		"HR",
+		"Human Resources",
+		"Accounts",
+		"Finance",
+	}
+)
+
 
 def user_has_nave_task_app_access(user: str | None, roles) -> bool:
 	"""
@@ -35,6 +48,23 @@ def user_has_nave_task_app_access(user: str | None, roles) -> bool:
 	if user == "Administrator":
 		return True
 	return bool(set(roles or []) & NAVE_TASK_APP_ROLES)
+
+
+def is_restricted_department(department_name: str | None) -> bool:
+	"""
+	True only when department_name exactly equals an entry in RESTRICTED_DEPARTMENTS.
+
+	Does not use keyword / substring heuristics. Empty or unknown departments
+	are not treated as restricted.
+	"""
+	name = (department_name or "").strip()
+	if not name:
+		return False
+	return name in RESTRICTED_DEPARTMENTS
+
+
+def normalize_department_name(department_name: str | None) -> str:
+	return (department_name or "").strip()
 
 UPDATE_TYPES = (
 	"Progress Update",
@@ -72,6 +102,122 @@ PRIVILEGED_SYSTEM_UPDATE_TYPES = frozenset(
 		"Recurrence Event",
 	}
 )
+
+PROGRESS_CHIP_TYPES = frozenset(
+	{
+		"Progress Update",
+		"Completion Update",
+		"Status Change",
+		"Close",
+		"Reassignment",
+	}
+)
+
+
+def format_conversation_time(value, *, now=None) -> str:
+	"""
+	Compact chat timestamp.
+	Examples: Today 7:15 PM · Yesterday 5:22 PM · 28 Jul 6:30 PM
+	Never includes milliseconds or raw ISO dumps.
+	"""
+	from datetime import datetime, timedelta
+
+	if value in (None, ""):
+		return ""
+
+	if hasattr(value, "hour"):
+		dt = value
+	else:
+		text = str(value).strip()
+		if not text:
+			return ""
+		# Drop microseconds / trailing Z.
+		text = text.replace("T", " ").replace("Z", "")
+		if "." in text:
+			text = text.split(".", 1)[0]
+		parsed = None
+		for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
+			try:
+				parsed = datetime.strptime(text, fmt)
+				break
+			except ValueError:
+				continue
+		if parsed is None:
+			return text[:16]
+		dt = parsed
+
+	if now is None:
+		now = datetime.now()
+	elif not hasattr(now, "hour"):
+		now = datetime.strptime(str(now)[:19], "%Y-%m-%d %H:%M:%S")
+
+	time_part = dt.strftime("%I:%M %p").lstrip("0")
+	d0 = now.date()
+	d1 = dt.date()
+	if d1 == d0:
+		return f"Today {time_part}"
+	if d1 == d0 - timedelta(days=1):
+		return f"Yesterday {time_part}"
+	if d1.year == d0.year:
+		return f"{dt.day} {dt.strftime('%b')} {time_part}"
+	return f"{dt.day} {dt.strftime('%b %Y')} {time_part}"
+
+
+def parse_seen_receipts(raw) -> dict:
+	"""Return {user_id: iso_datetime_str} from stored JSON/text."""
+	import json
+
+	if not raw:
+		return {}
+	if isinstance(raw, dict):
+		return {str(k): str(v) for k, v in raw.items() if k and v}
+	try:
+		data = json.loads(raw) if isinstance(raw, str) else {}
+	except (TypeError, ValueError):
+		return {}
+	if not isinstance(data, dict):
+		return {}
+	return {str(k): str(v) for k, v in data.items() if k and v}
+
+
+def dump_seen_receipts(receipts: dict) -> str:
+	import json
+
+	return json.dumps(parse_seen_receipts(receipts), sort_keys=True)
+
+
+def attachment_kind(path: str | None) -> str:
+	"""Return photo|pdf|excel|video|file|empty for compact previews."""
+	if not path:
+		return "empty"
+	lower = str(path).lower().split("?", 1)[0]
+	if lower.endswith((".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp")):
+		return "photo"
+	if lower.endswith(".pdf"):
+		return "pdf"
+	if lower.endswith((".xls", ".xlsx", ".csv", ".ods")):
+		return "excel"
+	if lower.endswith((".mp4", ".webm", ".mov", ".m4v", ".avi")):
+		return "video"
+	return "file"
+
+
+def build_progress_chip(update_type: str | None, status: str | None, progress) -> str | None:
+	"""Compact chip text like 'Working • 50%' for progress-like events."""
+	utype = update_type or ""
+	if utype == "Reassignment":
+		return "Reassigned"
+	if utype == "Close":
+		return "Closed"
+	if utype not in ("Progress Update", "Completion Update", "Status Change"):
+		return None
+	label = status or utype
+	try:
+		pct = int(float(progress or 0))
+	except (TypeError, ValueError):
+		pct = 0
+	return f"{label} • {pct}%"
+
 
 TRACKED_FIELD_LABELS = {
 	"assigned_to": "Assigned To",
@@ -146,8 +292,9 @@ def build_task_permission_condition(
 	SQL fragment for NAVE Task list/query permissions.
 
 	- Admins / Directors / System Managers: no restriction
-	- Managers with department: assignee OR department OR creator
-	- Everyone else: assignee OR creator only
+	- Managers with department: assignee OR own department OR creator OR
+	  participant (participant never unlocks RESTRICTED_DEPARTMENTS)
+	- Everyone else: assignee OR creator OR participant on non-restricted tasks
 	"""
 	if not user or user == "Guest":
 		return "1=0"
@@ -161,16 +308,33 @@ def build_task_permission_condition(
 		f"OR `tabNAVE Task`.`assigned_by` = {escaped_user})"
 	)
 	assignee_clause = f"`tabNAVE Task`.`assigned_to` = {escaped_user}"
+	participant_exists = (
+		"EXISTS ("
+		"SELECT 1 FROM `tabNAVE Task Update` "
+		"WHERE `tabNAVE Task Update`.`task` = `tabNAVE Task`.`name` "
+		f"AND `tabNAVE Task Update`.`update_by` = {escaped_user}"
+		")"
+	)
+	# Participation alone must not expose restricted-department tasks.
+	if RESTRICTED_DEPARTMENTS:
+		restricted_sql = ", ".join(escape(name) for name in sorted(RESTRICTED_DEPARTMENTS))
+		non_restricted = (
+			f"(IFNULL(`tabNAVE Task`.`department`, '') NOT IN ({restricted_sql}))"
+		)
+		participant_clause = f"({participant_exists} AND {non_restricted})"
+	else:
+		participant_clause = f"({participant_exists})"
 
 	if is_manager and department:
 		escaped_department = escape(department)
 		return (
 			f"({assignee_clause} "
 			f"OR `tabNAVE Task`.`department` = {escaped_department} "
-			f"OR {creator_clause})"
+			f"OR {creator_clause} "
+			f"OR {participant_clause})"
 		)
 
-	return f"({assignee_clause} OR {creator_clause})"
+	return f"({assignee_clause} OR {creator_clause} OR {participant_clause})"
 
 
 def user_can_access_task(
@@ -184,6 +348,7 @@ def user_can_access_task(
 	is_director: bool = False,
 	is_manager: bool,
 	user_department: str | None,
+	is_participant: bool = False,
 ) -> bool:
 	if not user or user == "Guest":
 		return False
@@ -194,6 +359,9 @@ def user_can_access_task(
 	if owner == user or assigned_by == user:
 		return True
 	if is_manager and user_department and department == user_department:
+		return True
+	# Participants inherit conversation access only outside restricted departments.
+	if is_participant and not is_restricted_department(department):
 		return True
 	return False
 
