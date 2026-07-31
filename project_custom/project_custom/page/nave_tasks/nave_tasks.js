@@ -221,6 +221,7 @@ frappe.pages["nave-tasks"].on_page_load = function (wrapper) {
 							<p class="nt-subtitle">Permission-aware overview of your work.</p>
 						</div>
 						<div class="nt-top-actions">
+							<button type="button" class="btn btn-primary nt-new-task">+ New Task</button>
 							<button class="btn btn-default nt-refresh">Refresh</button>
 						</div>
 					</div>
@@ -250,6 +251,7 @@ frappe.pages["nave-tasks"].on_page_load = function (wrapper) {
 			set_view($(this).data("view"));
 		});
 		page.main.find(".nt-refresh").on("click", () => load_current(true));
+		page.main.find(".nt-new-task").on("click", () => open_new_task_dialog());
 	};
 
 	const update_nav = () => {
@@ -835,64 +837,116 @@ frappe.pages["nave-tasks"].on_page_load = function (wrapper) {
 		return map[update_type || "Reply"] || "nt-type-reply";
 	};
 
-	const timeline_html = (items) => {
-		if (!items.length) {
-			return `<div class="nt-empty">No updates yet. Start the discussion with a reply or progress update.</div>`;
+	const display_time = (item) =>
+		item.display_time || item.datetime || item.updated_on || "";
+
+	const attachment_html = (item) => {
+		const attach = item.attachment || "";
+		if (!attach) return "";
+		const kind = item.attachment_kind || "";
+		const is_image = kind === "photo" || /\.(png|jpe?g|gif|webp)$/i.test(attach);
+		const is_video = kind === "video" || /\.(mp4|webm|mov|m4v)$/i.test(attach);
+		const label =
+			kind === "pdf"
+				? "PDF"
+				: kind === "excel"
+				? "Excel"
+				: kind === "video"
+				? "Video"
+				: kind === "photo"
+				? "Photo"
+				: "Attachment";
+		let preview = "";
+		if (is_image) {
+			preview = `<img class="nt-chat-attach-preview" src="${escape(attach)}" alt="">`;
+		} else if (is_video) {
+			preview = `<video class="nt-chat-attach-preview" controls src="${escape(attach)}"></video>`;
 		}
 		return `
-			<div class="nt-timeline">
+			<div class="nt-chat-attach">
+				<a class="nt-chat-attach-link" href="${escape(attach)}" target="_blank" rel="noopener">${escape(
+			label
+		)}</a>
+				${preview}
+			</div>`;
+	};
+
+	const message_row_html = (item, { is_reply = false } = {}) => {
+		const who = item.sender_full_name || "User";
+		const initial = String(who).trim().charAt(0).toUpperCase() || "?";
+		const type = item.update_type || "Reply";
+		const mine = item.is_mine ? "nt-chat-mine" : "nt-chat-theirs";
+		const ticks =
+			item.delivery_state === "seen"
+				? `<span class="nt-chat-ticks seen" title="${escape(
+						item.seen_display || "Seen"
+				  )}">✓✓</span>`
+				: `<span class="nt-chat-ticks sent" title="Sent">✓</span>`;
+		const chip = item.progress_chip
+			? `<span class="nt-progress-chip">${escape(item.progress_chip)}</span>`
+			: "";
+		const quote =
+			item.parent_snippet && !is_reply
+				? `<div class="nt-chat-quote"><span class="nt-chat-quote-name">${escape(
+						item.parent_sender_name || "Reply"
+				  )}</span><span class="nt-chat-quote-text">${escape(
+						item.parent_snippet
+				  )}</span></div>`
+				: "";
+		const type_label =
+			type && !["Reply", "Progress Update"].includes(type)
+				? `<span class="nt-chat-type">${escape(type)}</span>`
+				: "";
+
+		return `
+			<div class="nt-chat-msg ${mine} ${type_css_class(type)} ${
+			is_reply ? "nt-chat-reply-msg" : ""
+		}" data-update="${escape(item.name || "")}">
+				<div class="nt-chat-avatar">${escape(initial)}</div>
+				<div class="nt-chat-bubble">
+					<div class="nt-chat-head">
+						<span class="nt-chat-name">${escape(who)}</span>
+						<span class="nt-role-badge role-${escape(
+							(item.display_role || "Employee").toLowerCase()
+						)}">${escape(item.display_role || "Employee")}</span>
+						${type_label}
+						<span class="nt-chat-time">${escape(display_time(item))}</span>
+					</div>
+					${quote}
+					${chip}
+					<div class="nt-chat-text">${escape(item.update_text || "")}</div>
+					${attachment_html(item)}
+					<div class="nt-chat-foot">
+						<button type="button" class="nt-chat-reply-btn" data-parent="${escape(
+							item.name || ""
+						)}" data-snippet="${escape(item.update_text || "")}" data-who="${escape(
+			who
+		)}">Reply</button>
+						${item.is_mine ? ticks : ""}
+					</div>
+				</div>
+			</div>`;
+	};
+
+	const timeline_html = (items) => {
+		if (!items.length) {
+			return `<div class="nt-empty">No messages yet. Start the conversation below.</div>`;
+		}
+		return `
+			<div class="nt-chat-feed">
 				${items
 					.map((item) => {
-						const who =
-							item.sender_full_name ||
-							item.update_by ||
-							item.employee_name ||
-							item.employee ||
-							"User";
-						const initial = String(who).trim().charAt(0).toUpperCase() || "?";
-						const attach = item.attachment || "";
-						const is_image = /\.(png|jpe?g|gif|webp)$/i.test(attach);
-						const type = item.update_type || "Progress Update";
+						const replies = item.replies || [];
 						return `
-						<div class="nt-timeline-item ${type_css_class(type)}">
-							<div class="nt-timeline-avatar">${escape(initial)}</div>
-							<div class="nt-timeline-bubble">
-								<div class="nt-timeline-meta">
-									<strong>${escape(who)}</strong>
-									<span class="nt-role-badge role-${escape(
-										(item.display_role || "Employee").toLowerCase()
-									)}">${escape(item.display_role || "Employee")}</span>
-									<span class="nt-badge">${escape(type)}</span>
-									<span>${escape(item.datetime || item.updated_on || "")}</span>
-									${
-										item.sender_user_id
-											? `<span class="nt-muted">${escape(item.sender_user_id)}</span>`
-											: ""
-									}
-									${
-										item.employee_name
-											? `<span class="nt-muted">${escape(item.employee_name)}</span>`
-											: ""
-									}
-									${item.status ? `<span class="nt-badge status-${escape(item.status)}">${escape(item.status)}</span>` : ""}
-									${item.progress != null ? `<span>${escape(item.progress)}%</span>` : ""}
-								</div>
-								<div class="nt-timeline-text">${escape(item.update_text || "")}</div>
-								${
-									attach
-										? `<a class="nt-attach-link" href="${escape(
-												attach
-										  )}" target="_blank" rel="noopener">Download attachment</a>`
-										: ""
-								}
-								${
-									attach && is_image
-										? `<img class="nt-attach-preview" src="${escape(
-												attach
-										  )}" alt="Attachment preview">`
-										: ""
-								}
-							</div>
+						<div class="nt-chat-thread">
+							${message_row_html(item)}
+							${
+								replies.length
+									? `<div class="nt-chat-replies">${replies
+											.map((r) => message_row_html(r, { is_reply: true }))
+											.join("")}</div>`
+									: ""
+							}
 						</div>`;
 					})
 					.join("")}
@@ -905,18 +959,23 @@ frappe.pages["nave-tasks"].on_page_load = function (wrapper) {
 			? allowed_types
 			: ["Reply", "Progress Update", "Clarification Required", "Completion Update"];
 		return `
-			<div class="nt-composer">
-				<h4>Post to conversation</h4>
-				<textarea class="form-control nt-composer-message" rows="3" placeholder="Write a message…"></textarea>
-				<div class="nt-composer-row">
-					<select class="form-control nt-composer-type">
+			<div class="nt-chat-composer">
+				<div class="nt-chat-reply-banner" hidden>
+					<div class="nt-chat-reply-banner-text"></div>
+					<button type="button" class="nt-chat-reply-cancel" title="Cancel reply">×</button>
+				</div>
+				<textarea class="form-control nt-composer-message" rows="2" placeholder="Write a message… (Enter to send, Shift+Enter for new line)"></textarea>
+				<input type="hidden" class="nt-composer-parent" value="">
+				<input type="hidden" class="nt-composer-attachment" value="">
+				<div class="nt-chat-composer-bar">
+					<select class="form-control nt-composer-type" title="Message type">
 						${types
 							.map((t) => `<option value="${escape(t)}">${escape(t)}</option>`)
 							.join("")}
 					</select>
-					<input type="text" class="form-control nt-composer-attachment" placeholder="Attachment URL / file path" readonly>
-					<button type="button" class="btn btn-default btn-sm nt-composer-attach">Attach</button>
-					<button type="button" class="btn btn-primary btn-sm nt-composer-submit">Submit</button>
+					<button type="button" class="btn btn-default btn-sm nt-composer-attach" title="Attach">Attach</button>
+					<span class="nt-composer-attach-name nt-muted"></span>
+					<button type="button" class="btn btn-primary btn-sm nt-composer-submit">Send</button>
 				</div>
 			</div>
 		`;
@@ -928,9 +987,10 @@ frappe.pages["nave-tasks"].on_page_load = function (wrapper) {
 			size: "extra-large",
 			fields: [{ fieldtype: "HTML", fieldname: "body" }],
 		});
+		dialog.$wrapper.addClass("nt-conversation-dialog");
 		dialog.show();
 		dialog.fields_dict.body.$wrapper.html(
-			`<div class="nt-loading"><span class="nt-spinner"></span> Loading task…</div>`
+			`<div class="nt-loading"><span class="nt-spinner"></span> Loading conversation…</div>`
 		);
 
 		const render_detail = async () => {
@@ -938,10 +998,11 @@ frappe.pages["nave-tasks"].on_page_load = function (wrapper) {
 				const payload = await call(APP.VIEW_API.timeline, { task_name });
 				const task = payload.task || {};
 				const actions = action_visibility(task);
+				const assignee_label = task.assigned_to_name || task.assigned_to || "—";
 				const action_buttons = [];
 				if (actions.submit_update) {
 					action_buttons.push(
-						`<button class="btn btn-primary btn-sm nt-detail-act" data-act="update">Submit Update</button>`
+						`<button class="btn btn-primary btn-sm nt-detail-act" data-act="update">Submit Progress</button>`
 					);
 				}
 				if (actions.reassign) {
@@ -949,62 +1010,89 @@ frappe.pages["nave-tasks"].on_page_load = function (wrapper) {
 						`<button class="btn btn-default btn-sm nt-detail-act" data-act="reassign">Reassign</button>`
 					);
 				}
-				if (actions.close_task) {
-					action_buttons.push(
-						`<button class="btn btn-danger btn-sm nt-detail-act" data-act="close">Close Task</button>`
-					);
-				}
 				action_buttons.push(
 					`<a class="btn btn-default btn-sm" href="/app/nave-task/${encodeURIComponent(
 						task.name
-					)}" target="_blank" rel="noopener">Open Form</a>`
+					)}" target="_blank" rel="noopener">Open Full Form</a>`
 				);
 
 				const show_composer = actions.reply || actions.submit_update;
 				dialog.fields_dict.body.$wrapper.html(`
-					<div class="nt-detail-grid">
-						<div class="nt-detail-section">
-							<h4>${escape(task.subject || task_name)}</h4>
+					<div class="nt-conversation">
+						<aside class="nt-conversation-summary">
+							<div class="nt-summary-title">${escape(task.subject || task_name)}</div>
+							<div class="nt-summary-id">${escape(task.name || task_name)}</div>
 							<div class="nt-badges">
-								<span class="nt-badge status-${escape(task.status)}">${escape(task.status)}</span>
-								<span class="nt-badge priority-${escape(task.priority)}">${escape(task.priority)}</span>
-								${due_badges(task).join("")}
+								<span class="nt-badge status-${escape(task.status)}">${escape(task.status || "")}</span>
+								<span class="nt-badge priority-${escape(task.priority)}">${escape(
+					task.priority || ""
+				)}</span>
 							</div>
-							<div class="nt-task-desc">${escape(task.description || "No description")}</div>
-							<div class="nt-meta">
-								<div><b>ID:</b> ${escape(task.name)}</div>
-								<div><b>Assignee:</b> ${escape(task.assigned_to || "-")}</div>
-								<div><b>Created by:</b> ${escape(task.assigned_by || task.owner || "-")}</div>
-								<div><b>Project:</b> ${escape(task.project || "-")}</div>
-								<div><b>Due:</b> ${escape(task.due_date || "-")}</div>
-								<div><b>Progress:</b> ${escape(task.progress || 0)}%</div>
-								<div><b>Overdue:</b> ${as_int(task.is_overdue) ? "Yes" : "No"}</div>
-								<div><b>Latest:</b> ${escape(task.latest_update || "-")}</div>
+							<div class="nt-summary-rows">
+								<div><span>Progress</span><b>${escape(task.progress || 0)}%</b></div>
+								<div><span>Due</span><b>${escape(task.due_date || "—")}</b></div>
+								<div><span>Assigned To</span><b>${escape(assignee_label)}</b></div>
+								<div><span>Project</span><b>${escape(task.project || "—")}</b></div>
 							</div>
-							<div class="nt-actions" style="margin-top:12px;">${action_buttons.join("")}</div>
-						</div>
-						<div class="nt-detail-section">
-							<h4>Discussion timeline</h4>
-							${timeline_html(payload.timeline || [])}
+							<div class="nt-summary-actions">${action_buttons.join("")}</div>
+						</aside>
+						<section class="nt-conversation-main">
+							<div class="nt-conversation-scroll">
+								${timeline_html(payload.timeline || [])}
+							</div>
 							${show_composer ? composer_html(payload.allowed_update_types || []) : ""}
-						</div>
+						</section>
 					</div>
 				`);
 
-				dialog.fields_dict.body.$wrapper.find(".nt-detail-act").on("click", function () {
+				const $wrap = dialog.fields_dict.body.$wrapper;
+				const $scroll = $wrap.find(".nt-conversation-scroll");
+				$scroll.scrollTop($scroll.prop("scrollHeight"));
+
+				// Mark visible messages as seen (non-blocking).
+				frappe.call({
+					method: "project_custom.api.nave_task.mark_timeline_seen",
+					args: { task_name },
+				});
+
+				$wrap.find(".nt-detail-act").on("click", function () {
 					const act = $(this).data("act");
 					dialog.hide();
 					if (act === "update") open_update_dialog(task);
 					if (act === "reassign") open_reassign_dialog(task.name);
-					if (act === "close") open_close_dialog(task.name);
 				});
 
-				const $wrap = dialog.fields_dict.body.$wrapper;
+				const clear_reply_target = () => {
+					$wrap.find(".nt-composer-parent").val("");
+					$wrap.find(".nt-chat-reply-banner").attr("hidden", true);
+					$wrap.find(".nt-chat-reply-banner-text").text("");
+				};
+
+				const set_reply_target = (parent, who, snippet) => {
+					$wrap.find(".nt-composer-parent").val(parent || "");
+					$wrap.find(".nt-chat-reply-banner").attr("hidden", false);
+					$wrap
+						.find(".nt-chat-reply-banner-text")
+						.text(`Replying to ${who || "message"}: ${(snippet || "").slice(0, 80)}`);
+					$wrap.find(".nt-composer-type").val("Reply");
+					$wrap.find(".nt-composer-message").trigger("focus");
+				};
+
+				$wrap.on("click", ".nt-chat-reply-btn", function () {
+					set_reply_target(
+						$(this).data("parent"),
+						$(this).data("who"),
+						$(this).data("snippet")
+					);
+				});
+				$wrap.find(".nt-chat-reply-cancel").on("click", clear_reply_target);
+
 				$wrap.find(".nt-composer-attach").on("click", () => {
 					new frappe.ui.FileUploader({
 						restrictions: {
 							allowed_file_types: [
 								"image/*",
+								"video/*",
 								".pdf",
 								".doc",
 								".docx",
@@ -1016,14 +1104,16 @@ frappe.pages["nave-tasks"].on_page_load = function (wrapper) {
 						on_success(file) {
 							const path = file.file_url || file.name;
 							$wrap.find(".nt-composer-attachment").val(path);
+							$wrap.find(".nt-composer-attach-name").text(file.file_name || path);
 						},
 					});
 				});
 
-				$wrap.find(".nt-composer-submit").on("click", async () => {
+				const send_message = () => {
 					const message = $wrap.find(".nt-composer-message").val();
 					const update_type = $wrap.find(".nt-composer-type").val();
 					const attachment = $wrap.find(".nt-composer-attachment").val();
+					const parent_update = $wrap.find(".nt-composer-parent").val();
 					if (!(message || "").trim()) {
 						frappe.msgprint("Please enter a message.");
 						return;
@@ -1035,29 +1125,145 @@ frappe.pages["nave-tasks"].on_page_load = function (wrapper) {
 							message,
 							update_type,
 							attachment: attachment || undefined,
+							parent_update: parent_update || undefined,
 						},
 						freeze: true,
-						freeze_message: "Posting…",
+						freeze_message: __("Sending…"),
 						callback(r) {
 							if (!r.message?.ok) return;
-							frappe.show_alert({ message: "Posted to conversation", indicator: "green" });
+							frappe.show_alert({ message: __("Sent"), indicator: "green" });
 							render_detail();
 							load_current(true);
 						},
 					});
+				};
+
+				$wrap.find(".nt-composer-submit").on("click", send_message);
+				$wrap.find(".nt-composer-message").on("keydown", function (e) {
+					if (e.key === "Enter" && !e.shiftKey) {
+						e.preventDefault();
+						send_message();
+					}
 				});
 
 				if (focus_timeline) {
-					dialog.$wrapper.find(".nt-timeline").get(0)?.scrollIntoView({ behavior: "smooth" });
+					$scroll.get(0)?.scrollIntoView({ behavior: "smooth", block: "end" });
 				}
 			} catch (e) {
 				dialog.fields_dict.body.$wrapper.html(
-					`<div class="nt-error">Unable to load task details.</div>`
+					`<div class="nt-error">Unable to load task conversation.</div>`
 				);
 			}
 		};
 
 		await render_detail();
+	};
+
+	const open_new_task_dialog = () => {
+		const dialog = new frappe.ui.Dialog({
+			title: __("New Task"),
+			fields: [
+				{
+					fieldname: "subject",
+					fieldtype: "Data",
+					label: __("Task Title"),
+					reqd: 1,
+				},
+				{
+					fieldname: "assigned_to",
+					fieldtype: "Link",
+					options: "User",
+					label: __("Assign To"),
+					reqd: 1,
+					get_query: () => ({
+						filters: { enabled: 1, user_type: "System User" },
+					}),
+				},
+				{
+					fieldname: "project",
+					fieldtype: "Link",
+					options: "Project",
+					label: __("Project"),
+				},
+				{
+					fieldname: "department",
+					fieldtype: "Link",
+					options: "Department",
+					label: __("Department"),
+				},
+				{
+					fieldname: "priority",
+					fieldtype: "Select",
+					label: __("Priority"),
+					options: "Low\nMedium\nHigh\nUrgent",
+					default: "Medium",
+					reqd: 1,
+				},
+				{
+					fieldname: "due_date",
+					fieldtype: "Date",
+					label: __("Due Date"),
+					reqd: 1,
+				},
+				{
+					fieldname: "description",
+					fieldtype: "Small Text",
+					label: __("Description"),
+				},
+				{
+					fieldname: "attachment",
+					fieldtype: "Attach",
+					label: __("Attachment"),
+					options: "image/*,video/*,.pdf,.doc,.docx,.xls,.xlsx,.csv",
+				},
+			],
+			primary_action_label: __("Create Task"),
+			primary_action(values) {
+				if (!(values.subject || "").trim()) {
+					frappe.msgprint(__("Task Title is required."));
+					return;
+				}
+				if (!(values.assigned_to || "").trim()) {
+					frappe.msgprint(__("Assign To is required."));
+					return;
+				}
+				if (!(values.priority || "").trim()) {
+					frappe.msgprint(__("Priority is required."));
+					return;
+				}
+				if (!(values.due_date || "").trim()) {
+					frappe.msgprint(__("Due Date is required."));
+					return;
+				}
+				frappe.call({
+					method: "project_custom.api.nave_task.create_task",
+					args: {
+						subject: values.subject,
+						assigned_to: values.assigned_to,
+						priority: values.priority,
+						due_date: values.due_date,
+						description: values.description,
+						project: values.project,
+						department: values.department,
+						attachment: values.attachment,
+					},
+					freeze: true,
+					freeze_message: __("Creating task…"),
+					callback(r) {
+						if (!r.message?.ok) return;
+						dialog.hide();
+						const task_name = r.message.task;
+						frappe.show_alert({
+							message: __("Task {0} created", [task_name]),
+							indicator: "green",
+						});
+						load_current(true);
+						open_task_detail(task_name, true);
+					},
+				});
+			},
+		});
+		dialog.show();
 	};
 
 	const open_update_dialog = (task) => {
