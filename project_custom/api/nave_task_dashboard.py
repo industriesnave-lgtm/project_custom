@@ -9,6 +9,7 @@ from __future__ import annotations
 import frappe
 
 from project_custom.nave_task_dashboard import (
+	get_dashboard_chart,
 	get_dashboard_kpi_cards,
 	get_dashboard_list,
 	get_dashboard_metadata,
@@ -71,5 +72,16 @@ def get_task_dashboard_widget(widget_type, filters=None, limit=10):
 		widget_type,
 		filters=filters,
 		limit=limit,
+		user=frappe.session.user,
+	)
+
+
+@frappe.whitelist()
+def get_task_dashboard_chart(chart_type, filters=None):
+	"""Batch 8C: chart-ready trend and distribution payloads."""
+	_require_nave_task_access()
+	return get_dashboard_chart(
+		chart_type,
+		filters=filters,
 		user=frappe.session.user,
 	)

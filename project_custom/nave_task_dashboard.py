@@ -1,14 +1,12 @@
-"""NAVE Task Dashboard backend (Phase 4 — Batches 8A/8B).
+"""NAVE Task Dashboard backend (Phase 4 — Batches 8A/8B/8C).
 
-Builds KPI cards, compact lists, widgets, and metadata on top of
-nave_task_reporting. Does not implement UI. Reports must not call this
-module; this module may reuse reporting helpers and shared completion
-calculations.
+Builds KPI cards, compact lists, widgets, charts, and metadata on top of
+nave_task_reporting / script-report helpers. Does not implement UI.
 
 Row safeguard: summary aggregation uses get_task_rows limit_page_length=5000
-(same default as the reporting service). If exactly 5000 rows are returned,
-counts may be truncated for very large result sets — documented for later
-caching/pagination batches.
+(same default as the reporting service). Period/chart fetches may use the
+period-report safeguard (50k). Truncation is exposed in meta when groups are
+capped (e.g. top 25 departments/projects).
 """
 
 from __future__ import annotations
@@ -28,11 +26,19 @@ from project_custom.nave_task_reporting import (
 from project_custom.nave_task_script_reports import (
 	_avg,
 	_completion_pct,
+	_fetch_period_report_rows,
+	_resolve_summary_range,
 	_user_is_manager_level,
+	aggregate_period_stats,
 	classify_completion_result,
 	completion_days,
 	days_overdue,
 	delay_days,
+	execute_department_task_report,
+	execute_project_task_report,
+	generate_month_periods,
+	generate_week_periods,
+	validate_summary_date_range,
 )
 from project_custom.nave_task_utils import ACTIVE_STATUSES, is_terminal_status
 
@@ -85,6 +91,32 @@ SUPPORTED_WIDGET_TYPES = (
 	"overdue",
 	"high_priority",
 	"recently_updated",
+)
+
+SUPPORTED_CHART_TYPES = (
+	"monthly_trend",
+	"weekly_trend",
+	"status_distribution",
+	"priority_distribution",
+	"department_performance",
+	"project_performance",
+	"overdue_trend",
+)
+
+MAX_CHART_GROUPS = 25
+MAX_WEEKLY_CHART_DAYS = 365 * 2 + 1
+
+STATUS_DISTRIBUTION_LABELS = (
+	"Open",
+	"Working",
+	"Pending",
+	"Completed",
+	"Closed",
+)
+
+HISTORICAL_STATUS_NOTE = (
+	"Active and Overdue period values use current task status "
+	"(not a reconstructed historical snapshot)."
 )
 
 KPI_CARD_KEYS = (
@@ -648,10 +680,12 @@ def get_dashboard_metadata(*, user=None, today=None) -> dict:
 		"priorities": list(ALLOWED_PRIORITIES),
 		"list_types": list(SUPPORTED_LIST_TYPES),
 		"widget_types": list(SUPPORTED_WIDGET_TYPES),
+		"chart_types": list(SUPPORTED_CHART_TYPES),
 		"default_list_limit": DEFAULT_LIST_LIMIT,
 		"max_list_limit": MAX_LIST_LIMIT,
 		"default_widget_limit": DEFAULT_WIDGET_LIMIT,
 		"max_widget_limit": MAX_WIDGET_LIMIT,
+		"max_chart_groups": MAX_CHART_GROUPS,
 		"summary_row_limit": SUMMARY_ROW_LIMIT,
 		"kpi_card_keys": list(KPI_CARD_KEYS),
 		"default_filters": {
@@ -676,5 +710,327 @@ def get_dashboard_metadata(*, user=None, today=None) -> dict:
 				f"Widget lists default to {DEFAULT_WIDGET_LIMIT} rows "
 				f"(hard max {MAX_WIDGET_LIMIT})."
 			),
+			"charts": HISTORICAL_STATUS_NOTE,
 		},
 	}
+
+
+# ---------------------------------------------------------------------------
+# Charts & trends (Batch 8C)
+# ---------------------------------------------------------------------------
+
+
+def _chart_response(chart_type: str, labels: list, datasets: list, *, meta: dict) -> dict:
+	return {
+		"chart_type": chart_type,
+		"labels": list(labels),
+		"datasets": datasets,
+		"meta": meta,
+	}
+
+
+def _chart_meta(filters: dict, *, truncated: bool = False, extra: dict | None = None) -> dict:
+	meta = {
+		"generated_at": _now_iso(),
+		"truncated": bool(truncated),
+		"filters": filters or {},
+	}
+	if extra:
+		meta.update(extra)
+	return meta
+
+
+def _dataset(name: str, values: list) -> dict:
+	return {"name": name, "values": list(values)}
+
+
+def _validate_weekly_chart_range(from_date: date, to_date: date) -> None:
+	if from_date > to_date:
+		_throw_validation("From Date cannot be after To Date.")
+	if (to_date - from_date).days > MAX_WEEKLY_CHART_DAYS:
+		_throw_validation("Weekly chart date range cannot exceed 2 years.")
+
+
+def _period_trend_rows(filters=None, *, user=None, today=None, kind: str) -> tuple[list, dict, date, date]:
+	"""Reuse weekly/monthly summary aggregation for trend charts."""
+	raw, from_date, to_date, _day = _resolve_summary_range(filters, today=today)
+	if kind == "week":
+		_validate_weekly_chart_range(from_date, to_date)
+		periods = generate_week_periods(from_date, to_date)
+	else:
+		validate_summary_date_range(from_date, to_date)
+		periods = generate_month_periods(from_date, to_date)
+	rows = _fetch_period_report_rows(raw, user=user, to_date=to_date)
+	data = aggregate_period_stats(
+		rows,
+		periods,
+		from_date=from_date,
+		to_date=to_date,
+		kind=kind,
+	)
+	# Drop from_date from fetch filters echo; keep normalized dashboard filters.
+	chart_filters = normalize_dashboard_filters(raw)
+	chart_filters["from_date"] = from_date.isoformat()
+	chart_filters["to_date"] = to_date.isoformat()
+	return data, chart_filters, from_date, to_date
+
+
+def _trend_from_period_rows(chart_type: str, data: list[dict], chart_filters: dict) -> dict:
+	labels = [row["period_label"] for row in data]
+	datasets = [
+		_dataset("Created", [row["tasks_created"] for row in data]),
+		_dataset(
+			"Completed/Closed",
+			[row["completed_closed_total"] for row in data],
+		),
+		_dataset("Overdue", [row["overdue_at_end"] for row in data]),
+		_dataset("Active", [row["active_at_end"] for row in data]),
+	]
+	return _chart_response(
+		chart_type,
+		labels,
+		datasets,
+		meta=_chart_meta(
+			chart_filters,
+			extra={"historical_status": HISTORICAL_STATUS_NOTE},
+		),
+	)
+
+
+def chart_monthly_trend(filters=None, *, user=None, today=None) -> dict:
+	data, chart_filters, _f, _t = _period_trend_rows(
+		filters, user=user, today=today, kind="month"
+	)
+	return _trend_from_period_rows("monthly_trend", data, chart_filters)
+
+
+def chart_weekly_trend(filters=None, *, user=None, today=None) -> dict:
+	data, chart_filters, _f, _t = _period_trend_rows(
+		filters, user=user, today=today, kind="week"
+	)
+	return _trend_from_period_rows("weekly_trend", data, chart_filters)
+
+
+def chart_overdue_trend(filters=None, *, user=None, today=None) -> dict:
+	"""
+	Overdue workload over time.
+
+	Only current-status overdue-at-period-end is returned. Newly/resolved overdue
+	counts are not invented without historical status snapshots.
+	"""
+	raw = _parse_raw_filters(filters)
+	interval = str(raw.pop("interval", "") or "").strip().lower()
+	kind = "week" if interval in ("week", "weekly") else "month"
+	data, chart_filters, _f, _t = _period_trend_rows(
+		raw, user=user, today=today, kind=kind
+	)
+	if interval:
+		chart_filters["interval"] = "weekly" if kind == "week" else "monthly"
+	labels = [row["period_label"] for row in data]
+	datasets = [_dataset("Overdue", [row["overdue_at_end"] for row in data])]
+	return _chart_response(
+		"overdue_trend",
+		labels,
+		datasets,
+		meta=_chart_meta(
+			chart_filters,
+			extra={
+				"interval": "weekly" if kind == "week" else "monthly",
+				"historical_status": HISTORICAL_STATUS_NOTE,
+				"limitation": (
+					"Newly overdue and resolved overdue counts are unavailable "
+					"without historical status snapshots; only current-status "
+					"overdue-at-period-end is returned."
+				),
+			},
+		),
+	)
+
+
+def chart_status_distribution(filters=None, *, user=None, today=None) -> dict:
+	user = user or getattr(getattr(frappe, "session", None), "user", None)
+	normalized = normalize_dashboard_filters(filters)
+	rows = get_task_rows(
+		normalized,
+		user=user,
+		fields=("name", "status"),
+		order_by="modified desc",
+		limit_page_length=SUMMARY_ROW_LIMIT,
+	)
+	counts = {label: 0 for label in STATUS_DISTRIBUTION_LABELS}
+	for row in rows or []:
+		status = (_row_get(row, "status") or "").strip()
+		if status in counts:
+			counts[status] += 1
+	labels = list(STATUS_DISTRIBUTION_LABELS)
+	values = [counts[label] for label in labels]
+	truncated = len(rows or []) >= SUMMARY_ROW_LIMIT
+	return _chart_response(
+		"status_distribution",
+		labels,
+		[_dataset("Count", values)],
+		meta=_chart_meta(
+			normalized,
+			truncated=truncated,
+			extra={"row_count": len(rows or []), "row_limit": SUMMARY_ROW_LIMIT},
+		),
+	)
+
+
+def chart_priority_distribution(filters=None, *, user=None, today=None) -> dict:
+	user = user or getattr(getattr(frappe, "session", None), "user", None)
+	normalized = normalize_dashboard_filters(filters)
+	rows = get_task_rows(
+		normalized,
+		user=user,
+		fields=("name", "priority"),
+		order_by="modified desc",
+		limit_page_length=SUMMARY_ROW_LIMIT,
+	)
+	# Stable order from NAVE Task config — High remains separate from Urgent.
+	counts = {label: 0 for label in ALLOWED_PRIORITIES}
+	for row in rows or []:
+		priority = (_row_get(row, "priority") or "").strip()
+		if priority in counts:
+			counts[priority] += 1
+	labels = list(ALLOWED_PRIORITIES)
+	values = [counts[label] for label in labels]
+	truncated = len(rows or []) >= SUMMARY_ROW_LIMIT
+	return _chart_response(
+		"priority_distribution",
+		labels,
+		[_dataset("Count", values)],
+		meta=_chart_meta(
+			normalized,
+			truncated=truncated,
+			extra={"row_count": len(rows or []), "row_limit": SUMMARY_ROW_LIMIT},
+		),
+	)
+
+
+def _performance_rows_from_department(filters=None, *, user=None, today=None) -> list[dict]:
+	_columns, data, *_rest = execute_department_task_report(
+		filters, user=user, today=today
+	)
+	rows = []
+	for row in data or []:
+		active = int(row.get("open") or 0) + int(row.get("working") or 0) + int(
+			row.get("pending") or 0
+		)
+		done = int(row.get("completed") or 0) + int(row.get("closed") or 0)
+		total = int(row.get("total") or 0)
+		rows.append(
+			{
+				"label": row.get("department") or "(No Department)",
+				"total": total,
+				"active": active,
+				"completed_closed": done,
+				"overdue": int(row.get("overdue") or 0),
+				# Match Completed/Closed metric: (Completed + Closed) ÷ Total.
+				"completion_pct": _completion_pct(done, total),
+			}
+		)
+	return rows
+
+
+def _performance_rows_from_project(filters=None, *, user=None, today=None) -> list[dict]:
+	_columns, data, *_rest = execute_project_task_report(
+		filters, user=user, today=today
+	)
+	rows = []
+	for row in data or []:
+		active = int(row.get("open") or 0) + int(row.get("working") or 0) + int(
+			row.get("pending") or 0
+		)
+		done = int(row.get("completed") or 0) + int(row.get("closed") or 0)
+		total = int(row.get("total") or 0)
+		if row.get("_empty_project") or not row.get("project"):
+			label = "(No Project)"
+		else:
+			label = row.get("project")
+		rows.append(
+			{
+				"label": label,
+				"total": total,
+				"active": active,
+				"completed_closed": done,
+				"overdue": int(row.get("overdue") or 0),
+				"completion_pct": _completion_pct(done, total),
+			}
+		)
+	return rows
+
+
+def _sort_and_limit_performance_groups(
+	rows: list[dict],
+) -> tuple[list[dict], bool, int]:
+	ordered = sorted(
+		rows,
+		key=lambda r: (
+			-int(r.get("overdue") or 0),
+			-int(r.get("active") or 0),
+			str(r.get("label") or "").lower(),
+		),
+	)
+	total_groups = len(ordered)
+	truncated = total_groups > MAX_CHART_GROUPS
+	return ordered[:MAX_CHART_GROUPS], truncated, total_groups
+
+
+def _performance_chart(chart_type: str, rows: list[dict], filters: dict) -> dict:
+	limited, truncated, total_groups = _sort_and_limit_performance_groups(rows)
+	labels = [row["label"] for row in limited]
+	datasets = [
+		_dataset("Total", [row["total"] for row in limited]),
+		_dataset("Active", [row["active"] for row in limited]),
+		_dataset("Completed/Closed", [row["completed_closed"] for row in limited]),
+		_dataset("Overdue", [row["overdue"] for row in limited]),
+		_dataset("Completion %", [row["completion_pct"] for row in limited]),
+	]
+	return _chart_response(
+		chart_type,
+		labels,
+		datasets,
+		meta=_chart_meta(
+			filters,
+			truncated=truncated,
+			extra={
+				"total_groups": total_groups,
+				"returned_groups": len(limited),
+				"max_groups": MAX_CHART_GROUPS,
+			},
+		),
+	)
+
+
+def chart_department_performance(filters=None, *, user=None, today=None) -> dict:
+	normalized = normalize_dashboard_filters(filters)
+	rows = _performance_rows_from_department(
+		normalized, user=user, today=today
+	)
+	return _performance_chart("department_performance", rows, normalized)
+
+
+def chart_project_performance(filters=None, *, user=None, today=None) -> dict:
+	normalized = normalize_dashboard_filters(filters)
+	rows = _performance_rows_from_project(normalized, user=user, today=today)
+	return _performance_chart("project_performance", rows, normalized)
+
+
+def get_dashboard_chart(chart_type, filters=None, *, user=None, today=None) -> dict:
+	"""Dispatch chart-ready payloads for supported chart types."""
+	user = user or getattr(getattr(frappe, "session", None), "user", None)
+	chart_type = (chart_type or "").strip()
+	if chart_type not in SUPPORTED_CHART_TYPES:
+		_throw_validation(f"Unsupported chart type: {chart_type}")
+
+	dispatch = {
+		"monthly_trend": chart_monthly_trend,
+		"weekly_trend": chart_weekly_trend,
+		"status_distribution": chart_status_distribution,
+		"priority_distribution": chart_priority_distribution,
+		"department_performance": chart_department_performance,
+		"project_performance": chart_project_performance,
+		"overdue_trend": chart_overdue_trend,
+	}
+	return dispatch[chart_type](filters, user=user, today=today)
