@@ -4,7 +4,7 @@
  "docstatus": 0,
  "doctype": "Page",
  "idx": 0,
- "modified": "2026-07-31 12:00:00.000000",
+ "modified": "2026-07-31 17:00:00.000000",
  "modified_by": "Administrator",
  "module": "Project Custom",
  "name": "nave-task-dashboard",
@@ -12,16 +12,7 @@
  "page_name": "nave-task-dashboard",
  "roles": [
   {
-   "role": "Employee"
-  },
-  {
-   "role": "NAVE Task Manager"
-  },
-  {
-   "role": "NAVE Task Director"
-  },
-  {
-   "role": "System Manager"
+   "role": "NAVE Task Internal Redirect"
   }
  ],
  "script": null,

@@ -103,7 +103,9 @@ class TestSingleNavigationEntry(unittest.TestCase):
 		hooks = HOOKS.read_text(encoding="utf-8")
 		self.assertEqual(hooks.count('"title": "NAVE Tasks"'), 1)
 		self.assertIn('"/desk/nave-tasks"', hooks)
-		self.assertNotIn("nave-task-dashboard", hooks)
+		# add_to_apps_screen must not point at the legacy dashboard page.
+		apps_block = hooks.split("add_to_apps_screen")[1].split("website_redirects")[0]
+		self.assertNotIn("nave-task-dashboard", apps_block)
 
 	def test_desktop_icon_is_nave_tasks_only(self):
 		self.assertTrue(DESKTOP_ICON.exists())

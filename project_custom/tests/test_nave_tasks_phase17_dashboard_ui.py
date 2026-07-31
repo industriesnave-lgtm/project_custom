@@ -117,18 +117,20 @@ class TestPageRouteAndConfig(unittest.TestCase):
 		self.assertEqual(page["module"], "Project Custom")
 		self.assertEqual(page["standard"], "Yes")
 
-	def test_page_roles_registered(self):
+	def test_page_roles_hide_from_normal_navigation(self):
+		"""Legacy page keeps a sentinel role only — not Employee/Manager/Director.
+
+		Frappe lists Pages with matching Has Role rows in Awesome Bar / search.
+		Pages with zero roles are visible to everyone, so a sentinel role that
+		nobody is assigned is used to hide the standalone dashboard entry.
+		"""
 		page = json.loads(PAGE_JSON.read_text(encoding="utf-8"))
 		roles = {row["role"] for row in page.get("roles") or []}
-		self.assertEqual(
-			roles,
-			{
-				"Employee",
-				"NAVE Task Manager",
-				"NAVE Task Director",
-				"System Manager",
-			},
-		)
+		self.assertEqual(roles, {"NAVE Task Internal Redirect"})
+		self.assertNotIn("Employee", roles)
+		self.assertNotIn("NAVE Task Manager", roles)
+		self.assertNotIn("NAVE Task Director", roles)
+		self.assertNotIn("System Manager", roles)
 
 	def test_page_js_registers_route_handler(self):
 		js = PAGE_JS.read_text(encoding="utf-8")

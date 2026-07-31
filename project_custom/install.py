@@ -2,9 +2,36 @@ import frappe
 
 from project_custom.project_cost import recalculate_project_journal_entry_cost
 
+# Sentinel role for the legacy nave-task-dashboard Page.
+# Nobody is assigned this role, so the Page stays out of Awesome Bar / page search
+# (Frappe only lists Pages whose Has Role rows match the user). Empty roles would
+# expose the Page to everyone.
+NAVE_TASK_INTERNAL_REDIRECT_ROLE = "NAVE Task Internal Redirect"
+
+
+def ensure_nave_task_internal_redirect_role():
+    """Create the sentinel role used only to hide the legacy dashboard Page."""
+    if frappe.db.exists("Role", NAVE_TASK_INTERNAL_REDIRECT_ROLE):
+        return
+    doc = frappe.get_doc(
+        {
+            "doctype": "Role",
+            "role_name": NAVE_TASK_INTERNAL_REDIRECT_ROLE,
+            "desk_access": 0,
+            "is_custom": 1,
+        }
+    )
+    doc.insert(ignore_permissions=True)
+
+
+def before_migrate():
+    # Role must exist before standard Page sync applies Has Role Link rows.
+    ensure_nave_task_internal_redirect_role()
+
 
 def after_install():
     ensure_custom_fields()
+    ensure_nave_task_internal_redirect_role()
 
 
 def ensure_custom_fields():
@@ -75,5 +102,6 @@ def recalculate_all_project_journal_entry_costs():
 
 
 def after_migrate():
+    ensure_nave_task_internal_redirect_role()
     ensure_custom_fields()
     recalculate_all_project_journal_entry_costs()
