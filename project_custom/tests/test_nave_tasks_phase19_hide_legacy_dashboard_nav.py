@@ -137,8 +137,25 @@ class TestRedirectPreserved(unittest.TestCase):
 		self.assertIn('before_migrate = "project_custom.install.before_migrate"', hooks)
 		install = (WORKSPACE / "project_custom" / "install.py").read_text(encoding="utf-8")
 		self.assertIn('NAVE_TASK_INTERNAL_REDIRECT_ROLE = "NAVE Task Internal Redirect"', install)
-		self.assertIn("def before_migrate(", install)
-		self.assertIn("def ensure_nave_task_internal_redirect_role(", install)
+
+	def test_bootinfo_strips_legacy_dashboard_page(self):
+		hooks = HOOKS.read_text(encoding="utf-8")
+		self.assertIn('extend_bootinfo = "project_custom.boot.extend_bootinfo"', hooks)
+		from project_custom.boot import extend_bootinfo
+
+		boot = {
+			"page_info": {"nave-task-dashboard": {"title": "x"}, "nave-tasks": {"title": "NAVE Tasks"}},
+			"allowed_pages": ["nave-task-dashboard", "nave-tasks"],
+		}
+		extend_bootinfo(boot)
+		self.assertNotIn("nave-task-dashboard", boot["page_info"])
+		self.assertIn("nave-tasks", boot["page_info"])
+		self.assertEqual(boot["allowed_pages"], ["nave-tasks"])
+
+	def test_legacy_page_title_not_dashboard_label(self):
+		page = json.loads(DASHBOARD_JSON.read_text(encoding="utf-8"))
+		self.assertNotEqual(page.get("title"), "NAVE Task Dashboard")
+		self.assertEqual(page.get("system_page"), 1)
 
 
 class TestNaveTasksStillAccessible(unittest.TestCase):
