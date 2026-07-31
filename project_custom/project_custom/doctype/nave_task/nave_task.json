@@ -26,6 +26,19 @@
     "due_date",
     "completed_on",
     "is_overdue",
+    "recurrence_section",
+    "is_recurring",
+    "recurrence_active",
+    "recurrence_frequency",
+    "recurrence_start_date",
+    "recurrence_end_date",
+    "next_creation_date",
+    "last_generated_date",
+    "recurrence_due_after_days",
+    "recurring_template",
+    "generated_from",
+    "recurrence_sequence",
+    "recurrence_occurrence_date",
     "latest_update_section",
     "latest_update",
     "pending_reason",
@@ -76,7 +89,7 @@
       "in_list_view": 1,
       "in_standard_filter": 1,
       "label": "Status",
-      "options": "Open\nWorking\nPending\nCompleted\nCancelled",
+      "options": "Open\nWorking\nPending\nCompleted\nClosed\nCancelled",
       "reqd": 1
     },
     {
@@ -172,6 +185,93 @@
       "read_only": 1
     },
     {
+      "collapsible": 1,
+      "fieldname": "recurrence_section",
+      "fieldtype": "Section Break",
+      "label": "Recurrence"
+    },
+    {
+      "default": "0",
+      "fieldname": "is_recurring",
+      "fieldtype": "Check",
+      "in_standard_filter": 1,
+      "label": "Is Recurring"
+    },
+    {
+      "default": "1",
+      "depends_on": "eval:doc.is_recurring==1",
+      "fieldname": "recurrence_active",
+      "fieldtype": "Check",
+      "label": "Recurrence Active"
+    },
+    {
+      "depends_on": "eval:doc.is_recurring==1",
+      "fieldname": "recurrence_frequency",
+      "fieldtype": "Select",
+      "label": "Recurrence Frequency",
+      "options": "\nDaily\nWeekly\nMonthly\nYearly"
+    },
+    {
+      "depends_on": "eval:doc.is_recurring==1",
+      "fieldname": "recurrence_start_date",
+      "fieldtype": "Date",
+      "label": "Recurrence Start Date"
+    },
+    {
+      "depends_on": "eval:doc.is_recurring==1",
+      "fieldname": "recurrence_end_date",
+      "fieldtype": "Date",
+      "label": "Recurrence End Date"
+    },
+    {
+      "depends_on": "eval:doc.is_recurring==1",
+      "fieldname": "next_creation_date",
+      "fieldtype": "Date",
+      "label": "Next Creation Date"
+    },
+    {
+      "depends_on": "eval:doc.is_recurring==1",
+      "fieldname": "last_generated_date",
+      "fieldtype": "Date",
+      "label": "Last Generated Date",
+      "read_only": 1
+    },
+    {
+      "default": "0",
+      "depends_on": "eval:doc.is_recurring==1",
+      "fieldname": "recurrence_due_after_days",
+      "fieldtype": "Int",
+      "label": "Due After Days",
+      "non_negative": 1
+    },
+    {
+      "fieldname": "recurring_template",
+      "fieldtype": "Link",
+      "label": "Recurring Template",
+      "options": "NAVE Task",
+      "read_only": 1
+    },
+    {
+      "fieldname": "generated_from",
+      "fieldtype": "Link",
+      "label": "Generated From",
+      "options": "NAVE Task",
+      "read_only": 1
+    },
+    {
+      "default": "0",
+      "fieldname": "recurrence_sequence",
+      "fieldtype": "Int",
+      "label": "Recurrence Sequence",
+      "read_only": 1
+    },
+    {
+      "fieldname": "recurrence_occurrence_date",
+      "fieldtype": "Date",
+      "label": "Recurrence Occurrence Date",
+      "read_only": 1
+    },
+    {
       "fieldname": "latest_update_section",
       "fieldtype": "Section Break",
       "label": "Latest Progress"
@@ -233,6 +333,17 @@
     "read": 1,
     "report": 1,
     "role": "NAVE Task Manager",
+    "share": 1,
+    "write": 1
+  },
+  {
+    "create": 1,
+    "email": 1,
+    "export": 1,
+    "print": 1,
+    "read": 1,
+    "report": 1,
+    "role": "NAVE Task Director",
     "share": 1,
     "write": 1
   },

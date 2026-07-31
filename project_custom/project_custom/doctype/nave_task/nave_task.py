@@ -2,113 +2,368 @@ import frappe
 from frappe.model.document import Document
 from frappe.utils import flt, getdate, now_datetime, nowdate
 
+from project_custom.nave_task_notifications import (
+	notify_document_insert,
+	notify_document_update,
+)
+from project_custom.nave_task_recurrence import (
+	initial_next_creation_date,
+	normalize_support_required,
+	validate_recurrence_config,
+)
+from project_custom.nave_task_utils import (
+	DIRECTOR_ROLE,
+	MANAGER_ROLE,
+	TRACKED_FIELD_LABELS,
+	build_completion_field_updates,
+	build_reopen_field_updates,
+	compute_is_overdue,
+	format_field_change_message,
+	is_completion_transition,
+	is_manager_level_user,
+	is_reopen_transition,
+	validate_status_transition,
+	values_differ,
+)
+
 
 class NAVETask(Document):
-    def before_insert(self):
-        self.assigned_by = frappe.session.user
-        self.set_employee_details()
+	def before_insert(self):
+		if not self.assigned_by:
+			self.assigned_by = frappe.session.user
+		self.set_employee_details()
+		self.ensure_recurrence_defaults()
 
-    def validate(self):
-        self.validate_dates()
-        self.validate_progress()
-        self.set_employee_details()
-        self.set_completion_details()
-        self.set_overdue_status()
+	def validate(self):
+		previous_status = self._previous_status()
+		self.validate_dates()
+		self.validate_progress()
+		self.validate_status_workflow(previous_status)
+		self.apply_completion_and_reopen_fields(previous_status)
+		self.set_employee_details()
+		self.set_overdue_status()
+		self.validate_recurrence()
+		self.normalize_support_required_value()
 
-    def set_employee_details(self):
-        if not self.assigned_to:
-            return
+	def on_update(self):
+		self.log_tracked_field_changes()
+		self.sync_assignment_todos_after_save()
+		notify_document_update(self)
 
-        employee = frappe.db.get_value(
-            "Employee",
-            {
-                "user_id": self.assigned_to,
-                "status": "Active",
-            },
-            ["name", "department", "company"],
-            as_dict=True,
-        )
+	def _previous_status(self):
+		if self.is_new():
+			return None
+		before = self.get_doc_before_save()
+		if before:
+			return before.get("status")
+		return frappe.db.get_value(self.doctype, self.name, "status")
 
-        if not employee:
-            return
+	def _session_is_manager_level(self):
+		user = frappe.session.user
+		roles = frappe.get_roles(user)
+		return is_manager_level_user(
+			is_admin=user == "Administrator" or "System Manager" in roles,
+			is_director=DIRECTOR_ROLE in roles,
+			is_manager=MANAGER_ROLE in roles,
+		)
 
-        self.assigned_employee = employee.name
+	def validate_status_workflow(self, previous_status):
+		if self.is_new():
+			return
+		try:
+			validate_status_transition(
+				previous_status,
+				self.status,
+				is_manager_level=self._session_is_manager_level(),
+			)
+		except ValueError as exc:
+			frappe.throw(str(exc))
 
-        if not self.department:
-            self.department = employee.department
+	def apply_completion_and_reopen_fields(self, previous_status):
+		if is_reopen_transition(previous_status, self.status):
+			for field, value in build_reopen_field_updates().items():
+				setattr(self, field, value)
+			return
 
-        if not self.company:
-            self.company = employee.company
+		if self.status == "Completed":
+			updates = build_completion_field_updates(
+				existing_completed_on=self.completed_on
+				if previous_status == "Completed"
+				else None,
+				remarks=self.completion_remarks,
+				attachment=self.completion_attachment,
+				now=now_datetime(),
+			)
+			# Form path: keep any remarks/attachment already on the doc; force status/progress/on.
+			self.status = updates["status"]
+			self.progress = updates["progress"]
+			if "completed_on" in updates:
+				self.completed_on = updates["completed_on"]
+			return
 
-    def validate_dates(self):
-        if (
-            self.start_date
-            and self.due_date
-            and getdate(self.due_date) < getdate(self.start_date)
-        ):
-            frappe.throw("Due Date cannot be earlier than Start Date.")
+		if is_completion_transition(previous_status, self.status):
+			# Defensive: handled above when status is Completed.
+			pass
 
-    def validate_progress(self):
-        progress = flt(self.progress)
+		# Leaving Completed/Closed to a non-reopen path is blocked by the matrix.
+		# Clear completed_on when moving to active statuses other than reopen helper.
+		if self.status in ("Open", "Working", "Pending") and previous_status == "Completed":
+			# Only reachable if somehow same-status logic fails; reopen clears via helper.
+			self.completed_on = None
 
-        if progress < 0 or progress > 100:
-            frappe.throw("Progress must be between 0 and 100.")
+	def ensure_recurrence_defaults(self):
+		if self.is_recurring is None:
+			self.is_recurring = 0
+		if not self.is_recurring:
+			return
+		if self.recurrence_active is None:
+			self.recurrence_active = 1
+		if self.recurrence_due_after_days is None:
+			self.recurrence_due_after_days = 0
 
-        if self.status == "Completed":
-            self.progress = 100
+	def normalize_support_required_value(self):
+		# Keep Small Text storage; normalize Check-like values safely.
+		self.support_required = normalize_support_required(self.support_required)
 
-        if self.status == "Open" and progress > 0:
-            self.status = "Working"
+	def validate_recurrence(self):
+		# Generated instances must never act as templates.
+		if self.generated_from:
+			self.is_recurring = 0
+			self.recurrence_active = 0
 
-    def set_completion_details(self):
-        if self.status == "Completed":
-            if not self.completed_on:
-                self.completed_on = now_datetime()
-        else:
-            self.completed_on = None
+		errors = validate_recurrence_config(self.as_dict())
+		if errors:
+			frappe.throw(errors[0])
 
-    def set_overdue_status(self):
-        completed_statuses = ("Completed", "Cancelled")
+		if self.is_recurring:
+			if not self.next_creation_date:
+				self.next_creation_date = initial_next_creation_date(
+					self.as_dict(),
+					getdate(nowdate()),
+				)
+			if self.recurrence_active is None:
+				self.recurrence_active = 1
+		else:
+			# Leave historical recurrence metadata intact on disabled templates.
+			pass
 
-        self.is_overdue = int(
-            bool(
-                self.due_date
-                and getdate(self.due_date) < getdate(nowdate())
-                and self.status not in completed_statuses
-            )
-        )
+	def set_employee_details(self):
+		if not self.assigned_to:
+			return
 
-    def after_insert(self):
-        self.create_assignment_todo()
+		employee = frappe.db.get_value(
+			"Employee",
+			{
+				"user_id": self.assigned_to,
+				"status": "Active",
+			},
+			["name", "department", "company"],
+			as_dict=True,
+		)
 
-    def create_assignment_todo(self):
-        if not self.assigned_to:
-            return
+		if not employee:
+			return
 
-        existing_todo = frappe.db.exists(
-            "ToDo",
-            {
-                "reference_type": self.doctype,
-                "reference_name": self.name,
-                "allocated_to": self.assigned_to,
-                "status": "Open",
-            },
-        )
+		self.assigned_employee = employee.name
 
-        if existing_todo:
-            return
+		if not self.department:
+			self.department = employee.department
 
-        todo = frappe.get_doc(
-            {
-                "doctype": "ToDo",
-                "allocated_to": self.assigned_to,
-                "assigned_by": self.assigned_by,
-                "description": self.subject,
-                "reference_type": self.doctype,
-                "reference_name": self.name,
-                "date": self.due_date,
-                "priority": self.priority,
-                "status": "Open",
-            }
-        )
-        todo.insert(ignore_permissions=True)
+		if not self.company:
+			self.company = employee.company
+
+	def validate_dates(self):
+		if (
+			self.start_date
+			and self.due_date
+			and getdate(self.due_date) < getdate(self.start_date)
+		):
+			frappe.throw("Due Date cannot be earlier than Start Date.")
+
+	def validate_progress(self):
+		progress = flt(self.progress)
+
+		if progress < 0 or progress > 100:
+			frappe.throw("Progress must be between 0 and 100.")
+
+		if self.status == "Completed":
+			self.progress = 100
+
+		if self.status == "Open" and progress > 0:
+			self.status = "Working"
+
+	def set_overdue_status(self):
+		self.is_overdue = compute_is_overdue(
+			self.due_date,
+			self.status,
+			nowdate(),
+		)
+
+	def log_tracked_field_changes(self):
+		"""
+		Create exactly one System timeline entry per changed tracked field.
+		Status changes use a single Status Change entry instead of System.
+		Skipped when APIs set flags.skip_field_change_log or during migrate.
+		"""
+		if self.flags.get("skip_field_change_log"):
+			return
+		if frappe.flags.in_migrate or frappe.flags.in_install or frappe.flags.in_patch:
+			return
+		if self.is_new():
+			return
+
+		before = self.get_doc_before_save()
+		if not before:
+			return
+
+		logged = set(self.flags.get("logged_field_changes") or [])
+		status_changed = values_differ(before.get("status"), self.status, fieldname="status")
+
+		if status_changed and "status" not in logged:
+			self._insert_status_change_entry(before.get("status"), self.status)
+			logged.add("status")
+			# Avoid duplicate progress System row when status workflow also changes progress.
+			logged.add("progress")
+
+		for fieldname in TRACKED_FIELD_LABELS:
+			if fieldname in logged:
+				continue
+			old_value = before.get(fieldname)
+			new_value = self.get(fieldname)
+			if not values_differ(old_value, new_value, fieldname=fieldname):
+				continue
+
+			self._insert_system_field_change(fieldname, old_value, new_value)
+			logged.add(fieldname)
+
+		self.flags.logged_field_changes = logged
+
+	def _insert_status_change_entry(self, old_status, new_status):
+		message = f"Status changed from {old_status or '—'} to {new_status or '—'}."
+		self._insert_timeline_entry(
+			update_type="Status Change",
+			update_text=message,
+		)
+
+	def _insert_system_field_change(self, fieldname, old_value, new_value):
+		message = format_field_change_message(fieldname, old_value, new_value)
+		self._insert_timeline_entry(
+			update_type="System",
+			update_text=message,
+		)
+
+	def _insert_timeline_entry(self, *, update_type, update_text):
+		from frappe.utils import time_diff_in_seconds
+
+		recent = frappe.db.exists(
+			"NAVE Task Update",
+			{
+				"task": self.name,
+				"update_type": update_type,
+				"update_text": update_text,
+				"update_by": frappe.session.user,
+			},
+		)
+		if recent:
+			created = frappe.db.get_value("NAVE Task Update", recent, "creation")
+			if created and time_diff_in_seconds(now_datetime(), created) < 60:
+				return
+
+		employee = frappe.db.get_value(
+			"Employee",
+			{"user_id": frappe.session.user, "status": "Active"},
+			"name",
+		)
+		frappe.get_doc(
+			{
+				"doctype": "NAVE Task Update",
+				"task": self.name,
+				"update_by": frappe.session.user,
+				"employee": employee,
+				"updated_on": now_datetime(),
+				"update_type": update_type,
+				"status": self.status,
+				"progress": flt(self.progress),
+				"update_text": update_text,
+			}
+		).insert(ignore_permissions=True)
+
+	def after_insert(self):
+		self.create_assignment_todo()
+		notify_document_insert(self)
+
+	def cancel_open_assignment_todos(self, allocated_to):
+		"""Cancel Open ToDos for a previous assignee on this task."""
+		if not allocated_to or not self.name:
+			return 0
+
+		todos = frappe.get_all(
+			"ToDo",
+			filters={
+				"reference_type": self.doctype,
+				"reference_name": self.name,
+				"allocated_to": allocated_to,
+				"status": "Open",
+			},
+			pluck="name",
+		)
+		for todo_name in todos:
+			frappe.db.set_value(
+				"ToDo",
+				todo_name,
+				"status",
+				"Cancelled",
+				update_modified=False,
+			)
+		return len(todos)
+
+	def create_assignment_todo(self):
+		if not self.assigned_to:
+			return
+
+		existing_todo = frappe.db.exists(
+			"ToDo",
+			{
+				"reference_type": self.doctype,
+				"reference_name": self.name,
+				"allocated_to": self.assigned_to,
+				"status": "Open",
+			},
+		)
+
+		if existing_todo:
+			return
+
+		todo = frappe.get_doc(
+			{
+				"doctype": "ToDo",
+				"allocated_to": self.assigned_to,
+				"assigned_by": self.assigned_by,
+				"description": self.subject,
+				"reference_type": self.doctype,
+				"reference_name": self.name,
+				"date": self.due_date,
+				"priority": self.priority,
+				"status": "Open",
+			}
+		)
+		todo.insert(ignore_permissions=True)
+
+	def sync_assignment_todos(self, previous_assignee=None):
+		"""
+		Cancel previous assignee Open ToDos and ensure current assignee has one.
+		Safe to call from API (db_set path) or form save.
+		"""
+		if previous_assignee and previous_assignee != self.assigned_to:
+			self.cancel_open_assignment_todos(previous_assignee)
+		self.create_assignment_todo()
+
+	def sync_assignment_todos_after_save(self):
+		"""Form-save path: detect assigned_to change via get_doc_before_save."""
+		before = self.get_doc_before_save()
+		if not before:
+			return
+		previous = before.get("assigned_to")
+		if previous == self.assigned_to:
+			return
+		self.sync_assignment_todos(previous_assignee=previous)

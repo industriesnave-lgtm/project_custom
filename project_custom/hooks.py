@@ -5,14 +5,18 @@ app_description = "Project Journal Entry Connection"
 app_email = "industriesnave@gmail.com"
 
 after_install = "project_custom.install.after_install"
+before_migrate = "project_custom.install.before_migrate"
+after_migrate = "project_custom.install.after_migrate"
 
 override_doctype_dashboards = {
     "Project": "project_custom.dashboard.get_project_dashboard"
 }
 app_license = "mit"
-app_include_js = "/assets/project_custom/js/role_dashboard_redirect.js"
+app_include_js = [
+	"/assets/project_custom/js/role_dashboard_redirect.js",
+	"/assets/project_custom/js/nave_task_dashboard_ui.js",
+]
 on_login = "project_custom.login.redirect_to_nave_home"
-after_migrate = "project_custom.install.after_migrate"
 doctype_js = {
     "Sales Invoice": "public/js/submitted_invoice_edit.js",
     "Purchase Invoice": "public/js/submitted_invoice_edit.js",
@@ -36,10 +40,16 @@ add_to_apps_screen = [
     {
         "name": "project_custom",
         "logo": "/assets/project_custom/images/nave-task-management.svg",
-        "title": "Task Management",
+        "title": "NAVE Tasks",
         "route": "/desk/nave-tasks",
         "has_permission": "project_custom.api.nave_task.has_app_permission",
     }
+]
+
+# Keep legacy dashboard URLs working without exposing the standalone Page in search.
+website_redirects = [
+	{"source": "/app/nave-task-dashboard", "target": "/app/nave-tasks"},
+	{"source": "/desk/nave-task-dashboard", "target": "/desk/nave-tasks"},
 ]
 # Includes in <head>
 # ------------------
@@ -168,13 +178,19 @@ add_to_apps_screen = [
 
 # Scheduled Tasks
 # ---------------
+# Daily job: overdue flags, recurring generation, due/overdue reminders,
+# and manager/director escalation milestones (3-day / 7-day).
+# Exact execution time depends on the Frappe scheduler (not hardcoded to 09:00).
 
-# scheduler_events = {
+scheduler_events = {
+	"daily": [
+		"project_custom.api.nave_task.run_daily_nave_task_jobs",
+	],
+}
+
+# scheduler_events examples:
 # 	"all": [
 # 		"project_custom.tasks.all"
-# 	],
-# 	"daily": [
-# 		"project_custom.tasks.daily"
 # 	],
 # 	"hourly": [
 # 		"project_custom.tasks.hourly"
@@ -185,7 +201,6 @@ add_to_apps_screen = [
 # 	"monthly": [
 # 		"project_custom.tasks.monthly"
 # 	],
-# }
 
 # Testing
 # -------
