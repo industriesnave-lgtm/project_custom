@@ -1,4 +1,4 @@
-"""Thin whitelisted APIs for the NAVE Task Dashboard (Batch 8A).
+"""Thin whitelisted APIs for the NAVE Task Dashboard (Batches 8A/8B).
 
 All business logic lives in project_custom.nave_task_dashboard.
 Access uses the same app-role gate as other NAVE Task APIs.
@@ -9,9 +9,11 @@ from __future__ import annotations
 import frappe
 
 from project_custom.nave_task_dashboard import (
+	get_dashboard_kpi_cards,
 	get_dashboard_list,
 	get_dashboard_metadata,
 	get_dashboard_summary,
+	get_dashboard_widget,
 )
 from project_custom.nave_task_utils import user_has_nave_task_app_access
 
@@ -52,3 +54,22 @@ def get_task_dashboard_metadata():
 	"""Read-only dashboard UI metadata (no hidden users/departments)."""
 	_require_nave_task_access()
 	return get_dashboard_metadata(user=frappe.session.user)
+
+
+@frappe.whitelist()
+def get_task_dashboard_kpi_cards(filters=None):
+	"""Batch 8B: widget-ready KPI cards (reuses summary aggregation)."""
+	_require_nave_task_access()
+	return get_dashboard_kpi_cards(filters, user=frappe.session.user)
+
+
+@frappe.whitelist()
+def get_task_dashboard_widget(widget_type, filters=None, limit=10):
+	"""Batch 8B: widget-ready task list (reuses list API; max 25)."""
+	_require_nave_task_access()
+	return get_dashboard_widget(
+		widget_type,
+		filters=filters,
+		limit=limit,
+		user=frappe.session.user,
+	)

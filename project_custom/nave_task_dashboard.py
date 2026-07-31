@@ -1,8 +1,9 @@
-"""NAVE Task Dashboard backend foundation (Phase 4 — Batch 8A).
+"""NAVE Task Dashboard backend (Phase 4 — Batches 8A/8B).
 
-Builds KPI cards, compact lists, and metadata on top of nave_task_reporting.
-Does not implement UI. Reports must not call this module; this module may
-reuse reporting helpers and shared completion calculations.
+Builds KPI cards, compact lists, widgets, and metadata on top of
+nave_task_reporting. Does not implement UI. Reports must not call this
+module; this module may reuse reporting helpers and shared completion
+calculations.
 
 Row safeguard: summary aggregation uses get_task_rows limit_page_length=5000
 (same default as the reporting service). If exactly 5000 rows are returned,
@@ -73,6 +74,65 @@ SUPPORTED_LIST_TYPES = (
 DEFAULT_LIST_LIMIT = 10
 MAX_LIST_LIMIT = 50
 SUMMARY_ROW_LIMIT = 5000
+
+# Batch 8B widget surface (stricter than generic list API max).
+DEFAULT_WIDGET_LIMIT = 10
+MAX_WIDGET_LIMIT = 25
+
+SUPPORTED_WIDGET_TYPES = (
+	"due_today",
+	"due_tomorrow",
+	"overdue",
+	"high_priority",
+	"recently_updated",
+)
+
+KPI_CARD_KEYS = (
+	"total",
+	"active",
+	"open",
+	"working",
+	"pending",
+	"completed",
+	"closed",
+	"overdue",
+	"due_today",
+	"due_tomorrow",
+	"high_priority",
+	"completed_today",
+)
+
+KPI_CARD_LABELS = {
+	"total": "Total",
+	"active": "Active",
+	"open": "Open",
+	"working": "Working",
+	"pending": "Pending",
+	"completed": "Completed",
+	"closed": "Closed",
+	"overdue": "Overdue",
+	"due_today": "Due Today",
+	"due_tomorrow": "Due Tomorrow",
+	"high_priority": "High Priority",
+	"completed_today": "Completed Today",
+}
+
+WIDGET_ITEM_FIELDS = (
+	"name",
+	"title",
+	"assigned_to",
+	"status",
+	"priority",
+	"due_date",
+	"project",
+	"department",
+	"modified",
+	"overdue_days",
+)
+
+WIDGET_TYPES_WITH_OVERDUE_DAYS = frozenset(
+	{"overdue", "due_today", "due_tomorrow", "high_priority"}
+)
 
 DASHBOARD_LIST_FIELDS = (
 	"name",
@@ -475,6 +535,98 @@ def get_dashboard_list(
 	}
 
 
+def clamp_widget_limit(limit=None) -> int:
+	"""Default 10; hard max 25; invalid → default."""
+	if limit is None or limit == "":
+		return DEFAULT_WIDGET_LIMIT
+	try:
+		value = int(limit)
+	except (TypeError, ValueError):
+		return DEFAULT_WIDGET_LIMIT
+	if value < 1:
+		return DEFAULT_WIDGET_LIMIT
+	return min(value, MAX_WIDGET_LIMIT)
+
+
+def _shape_widget_item(row: dict, *, widget_type: str) -> dict:
+	"""Trim list rows to widget fields only (no descriptions/attachments)."""
+	item = {
+		"name": row.get("name"),
+		"title": row.get("title") or row.get("subject"),
+		"assigned_to": row.get("assigned_to"),
+		"status": row.get("status"),
+		"priority": row.get("priority"),
+		"due_date": row.get("due_date"),
+		"project": row.get("project"),
+		"department": row.get("department"),
+		"modified": row.get("modified"),
+	}
+	if widget_type in WIDGET_TYPES_WITH_OVERDUE_DAYS:
+		item["overdue_days"] = row.get("overdue_days")
+	return item
+
+
+def get_dashboard_kpi_cards(filters=None, *, user=None, today=None) -> dict:
+	"""
+	Widget-ready KPI cards.
+
+	Reuses get_dashboard_summary — no separate aggregation.
+	"""
+	summary = get_dashboard_summary(filters, user=user, today=today)
+	raw_cards = summary.get("cards") or {}
+	cards = {key: int(raw_cards.get(key) or 0) for key in KPI_CARD_KEYS}
+	card_list = [
+		{"key": key, "label": KPI_CARD_LABELS[key], "value": cards[key]}
+		for key in KPI_CARD_KEYS
+	]
+	return {
+		"filters": summary.get("filters") or {},
+		"generated_at": summary.get("generated_at") or _now_iso(),
+		"cards": cards,
+		"card_list": card_list,
+		"meta": summary.get("meta") or {},
+	}
+
+
+def get_dashboard_widget(
+	widget_type,
+	filters=None,
+	limit=None,
+	*,
+	user=None,
+	today=None,
+) -> dict:
+	"""
+	Widget-ready task list for one dashboard panel.
+
+	Reuses get_dashboard_list with widget limit cap (max 25).
+	"""
+	widget_type = (widget_type or "").strip()
+	if widget_type not in SUPPORTED_WIDGET_TYPES:
+		_throw_validation(f"Unsupported widget type: {widget_type}")
+
+	capped = clamp_widget_limit(limit)
+	payload = get_dashboard_list(
+		widget_type,
+		filters=filters,
+		limit=capped,
+		user=user,
+		today=today,
+	)
+	items = [
+		_shape_widget_item(row, widget_type=widget_type)
+		for row in (payload.get("data") or [])
+	]
+	return {
+		"widget": widget_type,
+		"filters": payload.get("filters") or {},
+		"limit": capped,
+		"generated_at": payload.get("generated_at") or _now_iso(),
+		"items": items,
+		"count": len(items),
+	}
+
+
 
 def get_dashboard_metadata(*, user=None, today=None) -> dict:
 	"""UI metadata only — no hidden users, departments, or permission SQL."""
@@ -495,9 +647,13 @@ def get_dashboard_metadata(*, user=None, today=None) -> dict:
 		"statuses": list(ALLOWED_STATUSES),
 		"priorities": list(ALLOWED_PRIORITIES),
 		"list_types": list(SUPPORTED_LIST_TYPES),
+		"widget_types": list(SUPPORTED_WIDGET_TYPES),
 		"default_list_limit": DEFAULT_LIST_LIMIT,
 		"max_list_limit": MAX_LIST_LIMIT,
+		"default_widget_limit": DEFAULT_WIDGET_LIMIT,
+		"max_widget_limit": MAX_WIDGET_LIMIT,
 		"summary_row_limit": SUMMARY_ROW_LIMIT,
+		"kpi_card_keys": list(KPI_CARD_KEYS),
 		"default_filters": {
 			"assigned_to": None,
 			"department": None,
@@ -515,6 +671,10 @@ def get_dashboard_metadata(*, user=None, today=None) -> dict:
 			"summary_row_limit": (
 				f"Summary aggregates at most {SUMMARY_ROW_LIMIT} visible tasks "
 				"per request (reporting service safeguard)."
+			),
+			"widgets": (
+				f"Widget lists default to {DEFAULT_WIDGET_LIMIT} rows "
+				f"(hard max {MAX_WIDGET_LIMIT})."
 			),
 		},
 	}
