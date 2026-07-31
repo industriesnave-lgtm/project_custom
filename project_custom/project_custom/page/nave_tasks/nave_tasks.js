@@ -19,6 +19,7 @@ frappe.pages["nave-tasks"].on_page_load = function (wrapper) {
 			loading: false,
 			error: "",
 			counts: null,
+			dashboard_controller: null,
 			filters: {
 				search: "",
 				status: "",
@@ -1281,14 +1282,22 @@ frappe.pages["nave-tasks"].on_page_load = function (wrapper) {
 	};
 
 	const load_dashboard = async () => {
-		set_loading("Loading dashboard…");
-		try {
-			const counts = await call(APP.VIEW_API.dashboard);
-			APP.state.counts = counts;
-			render_dashboard(counts);
-		} catch (e) {
-			set_error("Unable to load dashboard counters.");
+		if (
+			!frappe.project_custom ||
+			typeof frappe.project_custom.mount_nave_task_dashboard !== "function"
+		) {
+			set_error("Dashboard UI failed to load. Please refresh the page.");
+			return;
 		}
+		if (APP.state.dashboard_controller) {
+			APP.state.dashboard_controller.refresh();
+			return;
+		}
+		APP.$view.empty();
+		APP.state.dashboard_controller = frappe.project_custom.mount_nave_task_dashboard(
+			APP.$view,
+			{ embedded: true }
+		);
 	};
 
 	const load_task_view = async (append = false) => {
@@ -1334,6 +1343,10 @@ frappe.pages["nave-tasks"].on_page_load = function (wrapper) {
 	};
 
 	const set_view = (view) => {
+		if (APP.state.dashboard_controller && view !== "dashboard") {
+			APP.state.dashboard_controller.destroy();
+			APP.state.dashboard_controller = null;
+		}
 		APP.state.view = view;
 		APP.state.page_no = 1;
 		APP.state.items = [];

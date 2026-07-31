@@ -15,6 +15,19 @@ frappe.pages["nave-home"].on_page_load = function (wrapper) {
 
         const cards = [
                 {
+                        title: "NAVE Tasks",
+                        description: "Tasks, dashboard KPIs, overdue work and updates",
+                        icon: "📋",
+                        color: "#1683d8",
+                        route: "/desk/nave-tasks",
+                        roles: [
+                                "Employee",
+                                "NAVE Task Manager",
+                                "NAVE Task Director",
+                                "System Manager",
+                        ],
+                },
+                {
                         title: "Sales",
                         description: "Sales performance, orders and collections",
                         icon: "📈",

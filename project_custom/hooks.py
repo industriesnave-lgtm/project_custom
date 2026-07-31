@@ -10,7 +10,10 @@ override_doctype_dashboards = {
     "Project": "project_custom.dashboard.get_project_dashboard"
 }
 app_license = "mit"
-app_include_js = "/assets/project_custom/js/role_dashboard_redirect.js"
+app_include_js = [
+	"/assets/project_custom/js/role_dashboard_redirect.js",
+	"/assets/project_custom/js/nave_task_dashboard_ui.js",
+]
 on_login = "project_custom.login.redirect_to_nave_home"
 after_migrate = "project_custom.install.after_migrate"
 doctype_js = {

@@ -85,6 +85,8 @@ PAGE_DIR = (
 )
 PAGE_JSON = PAGE_DIR / "nave_task_dashboard.json"
 PAGE_JS = PAGE_DIR / "nave_task_dashboard.js"
+# Phase 4.5: Batch 8D renderer lives in the shared public JS module.
+UI_JS = WORKSPACE / "project_custom" / "public" / "js" / "nave_task_dashboard_ui.js"
 
 EXPECTED_API_METHODS = (
 	"project_custom.api.nave_task_dashboard.get_task_dashboard_metadata",
@@ -132,11 +134,15 @@ class TestPageRouteAndConfig(unittest.TestCase):
 		js = PAGE_JS.read_text(encoding="utf-8")
 		self.assertIn('frappe.pages["nave-task-dashboard"].on_page_load', js)
 		self.assertIn("frappe.ui.make_app_page", js)
+		# Phase 4.5: standalone page redirects into consolidated NAVE Tasks.
+		self.assertIn('frappe.set_route("nave-tasks")', js)
+		self.assertTrue(UI_JS.exists(), "Shared dashboard UI missing")
+		self.assertIn("mount_nave_task_dashboard", UI_JS.read_text(encoding="utf-8"))
 
 
 class TestApiMethodContracts(unittest.TestCase):
 	def test_dashboard_api_method_names_referenced(self):
-		js = PAGE_JS.read_text(encoding="utf-8")
+		js = UI_JS.read_text(encoding="utf-8")
 		for method in EXPECTED_API_METHODS:
 			self.assertIn(method, js)
 
@@ -152,7 +158,7 @@ class TestApiMethodContracts(unittest.TestCase):
 			self.assertTrue(callable(getattr(api, short, None)), short)
 
 	def test_no_direct_db_or_permission_bypass_in_ui(self):
-		js = PAGE_JS.read_text(encoding="utf-8")
+		js = UI_JS.read_text(encoding="utf-8")
 		self.assertNotIn("frappe.db.", js)
 		self.assertNotIn("frappe.get_list(", js)
 		self.assertNotIn("frappe.get_all(", js)
@@ -162,7 +168,7 @@ class TestApiMethodContracts(unittest.TestCase):
 
 class TestFilterPayloadAndDates(unittest.TestCase):
 	def test_filter_keys_present(self):
-		js = PAGE_JS.read_text(encoding="utf-8")
+		js = UI_JS.read_text(encoding="utf-8")
 		for key in FILTER_KEYS:
 			self.assertIn(f'data-key="{key}"', js) if key in (
 				"from_date",
@@ -172,7 +178,7 @@ class TestFilterPayloadAndDates(unittest.TestCase):
 			) else self.assertIn(key, js)
 
 	def test_filter_payload_mapping_contract(self):
-		js = PAGE_JS.read_text(encoding="utf-8")
+		js = UI_JS.read_text(encoding="utf-8")
 		# Apply/Clear/Refresh controls
 		self.assertIn("ntd-apply", js)
 		self.assertIn("ntd-clear", js)
@@ -187,13 +193,13 @@ class TestFilterPayloadAndDates(unittest.TestCase):
 		self.assertNotIn('"Engineering"', js)
 
 	def test_invalid_date_range_handling(self):
-		js = PAGE_JS.read_text(encoding="utf-8")
+		js = UI_JS.read_text(encoding="utf-8")
 		self.assertIn("From Date cannot be after To Date.", js)
 		self.assertIn("validate_dates", js)
 		self.assertIn("ntd-filter-error", js)
 
 	def test_widget_filters_omit_creation_date_range(self):
-		js = PAGE_JS.read_text(encoding="utf-8")
+		js = UI_JS.read_text(encoding="utf-8")
 		self.assertIn("widget_filters", js)
 		self.assertIn("delete widget_filters.from_date", js)
 		self.assertIn("delete widget_filters.to_date", js)
@@ -201,7 +207,7 @@ class TestFilterPayloadAndDates(unittest.TestCase):
 
 class TestUiStateContracts(unittest.TestCase):
 	def test_kpi_zero_values_render_safely(self):
-		js = PAGE_JS.read_text(encoding="utf-8")
+		js = UI_JS.read_text(encoding="utf-8")
 		self.assertIn("card.value == null ? 0 : card.value", js)
 		self.assertIn("get_task_dashboard_kpi_cards", js)
 		# No client-side KPI aggregation from task rows / DB
@@ -211,12 +217,12 @@ class TestUiStateContracts(unittest.TestCase):
 		self.assertNotIn("completed_today++", kpi_section)
 
 	def test_empty_widget_and_chart_states(self):
-		js = PAGE_JS.read_text(encoding="utf-8")
+		js = UI_JS.read_text(encoding="utf-8")
 		self.assertIn("No tasks found", js)
 		self.assertIn("No data available", js)
 
 	def test_error_state_handling(self):
-		js = PAGE_JS.read_text(encoding="utf-8")
+		js = UI_JS.read_text(encoding="utf-8")
 		self.assertIn("ntd-global-error", js)
 		self.assertIn("Unable to load KPI cards.", js)
 		self.assertIn("Unable to load widget.", js)
@@ -225,27 +231,27 @@ class TestUiStateContracts(unittest.TestCase):
 		self.assertIn("console.error", js)
 
 	def test_refresh_prevents_overlapping_requests(self):
-		js = PAGE_JS.read_text(encoding="utf-8")
+		js = UI_JS.read_text(encoding="utf-8")
 		self.assertIn("state.loading", js)
 		self.assertIn("request_id", js)
 		self.assertIn("if (state.loading)", js)
 		self.assertIn('.prop("disabled", !!loading)', js)
 
 	def test_task_links_use_valid_nave_task_routes(self):
-		js = PAGE_JS.read_text(encoding="utf-8")
+		js = UI_JS.read_text(encoding="utf-8")
 		self.assertIn("/app/nave-task/", js)
 		self.assertIn("encodeURIComponent(name", js)
 		self.assertNotIn("/app/task/", js)
 
 	def test_truncation_metadata_notice(self):
-		js = PAGE_JS.read_text(encoding="utf-8")
+		js = UI_JS.read_text(encoding="utf-8")
 		self.assertIn("meta.truncated", js)
 		self.assertIn("returned_groups", js)
 		self.assertIn("total_groups", js)
 		self.assertIn("Showing top", js)
 
 	def test_chart_instances_destroyed_before_rerender(self):
-		js = PAGE_JS.read_text(encoding="utf-8")
+		js = UI_JS.read_text(encoding="utf-8")
 		self.assertIn("destroy_chart", js)
 		self.assertIn("chart_instances", js)
 		self.assertIn("frappe.Chart", js)
@@ -253,7 +259,7 @@ class TestUiStateContracts(unittest.TestCase):
 		self.assertNotIn("highcharts", js.lower())
 
 	def test_required_widgets_and_charts_present(self):
-		js = PAGE_JS.read_text(encoding="utf-8")
+		js = UI_JS.read_text(encoding="utf-8")
 		for widget in (
 			"due_today",
 			"due_tomorrow",
@@ -273,7 +279,7 @@ class TestUiStateContracts(unittest.TestCase):
 			self.assertIn(f'type: "{chart}"', js)
 
 	def test_no_polling_or_realtime(self):
-		js = PAGE_JS.read_text(encoding="utf-8")
+		js = UI_JS.read_text(encoding="utf-8")
 		self.assertNotIn("setInterval", js)
 		self.assertNotIn("frappe.realtime", js)
 		self.assertNotIn("socket", js.lower())
@@ -306,7 +312,7 @@ class TestBackendPermissionStillAuthoritative(unittest.TestCase):
 
 class TestJsDoesNotRecalculateBackendMetrics(unittest.TestCase):
 	def test_no_overdue_or_kpi_math_helpers(self):
-		js = PAGE_JS.read_text(encoding="utf-8")
+		js = UI_JS.read_text(encoding="utf-8")
 		# Client must not invent overdue/KPI math — only render API payloads.
 		self.assertNotIn("days_overdue", js)
 		self.assertNotIn("is_overdue", js)
