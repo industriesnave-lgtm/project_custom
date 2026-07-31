@@ -913,7 +913,12 @@ def post_task_message(
 	new_progress = flt(task.progress)
 	field_updates = {}
 
-	if update_type == "Progress Update" and can_submit_progress_on_task(task, user):
+	if update_type == "Progress Update":
+		if not can_submit_progress_on_task(task, user):
+			frappe.throw(
+				"Only the assigned employee or an authorized manager can submit progress updates.",
+				frappe.PermissionError,
+			)
 		if status:
 			new_status = status
 		if progress is not None:

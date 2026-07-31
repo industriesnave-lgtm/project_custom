@@ -248,6 +248,65 @@ class TestDuplicatePrevention(unittest.TestCase):
 		self.assertFalse(result["created"])
 		self.assertEqual(result["task"], "NT-EXISTING")
 
+	def test_force_occurrence_mismatch_does_not_advance(self):
+		"""P2: ad-hoc Generate Now dates must not skip/rewind the schedule."""
+		template = types.SimpleNamespace(
+			name="NT-TEMPLATE",
+			is_recurring=1,
+			recurrence_active=1,
+			status="Open",
+			recurrence_end_date=None,
+			next_creation_date="2026-08-01",
+		)
+		created = {
+			"ok": True,
+			"created": True,
+			"task": "NT-NEW",
+			"occurrence_date": "2026-09-15",
+			"sequence": 1,
+		}
+		self.frappe.get_doc = MagicMock(return_value=template)
+		with (
+			patch.object(self.gen, "create_generated_task", return_value=created) as create,
+			patch.object(self.gen, "advance_template_after_generation") as advance,
+		):
+			result = self.gen.process_template(
+				"NT-TEMPLATE",
+				force_occurrence=date(2026, 9, 15),
+				source="manual",
+			)
+		create.assert_called_once()
+		advance.assert_not_called()
+		self.assertEqual(len(result["created"]), 1)
+
+	def test_force_occurrence_matching_next_advances(self):
+		template = types.SimpleNamespace(
+			name="NT-TEMPLATE",
+			is_recurring=1,
+			recurrence_active=1,
+			status="Open",
+			recurrence_end_date=None,
+			next_creation_date="2026-08-01",
+		)
+		created = {
+			"ok": True,
+			"created": True,
+			"task": "NT-NEW",
+			"occurrence_date": "2026-08-01",
+			"sequence": 1,
+		}
+		self.frappe.get_doc = MagicMock(return_value=template)
+		with (
+			patch.object(self.gen, "create_generated_task", return_value=created),
+			patch.object(self.gen, "advance_template_after_generation") as advance,
+		):
+			self.gen.process_template(
+				"NT-TEMPLATE",
+				force_occurrence=date(2026, 8, 1),
+				source="manual",
+			)
+		advance.assert_called_once()
+
 
 class TestPermissionChecks(unittest.TestCase):
 	def test_recurrence_manage_permission_creator(self):

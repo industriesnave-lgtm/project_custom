@@ -61,6 +61,18 @@ CONVERSATION_UPDATE_TYPES = (
 
 INTERNAL_NOTE_TYPE = "Internal Note"
 
+# Timeline types written only by trusted server paths (APIs, hooks, scheduler).
+# Direct DocType / resource-API inserts must not forge these.
+PRIVILEGED_SYSTEM_UPDATE_TYPES = frozenset(
+	{
+		"System",
+		"Reassignment",
+		"Status Change",
+		"Close",
+		"Recurrence Event",
+	}
+)
+
 TRACKED_FIELD_LABELS = {
 	"assigned_to": "Assigned To",
 	"status": "Status",

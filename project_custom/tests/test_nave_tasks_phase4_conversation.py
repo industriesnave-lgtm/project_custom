@@ -355,6 +355,35 @@ class TestTimelineEnrichment(unittest.TestCase):
 					update_type="Internal Note",
 				)
 
+	def test_viewer_cannot_post_progress_update_without_permission(self):
+		"""P2: Progress Update must not silently succeed for non-assignees."""
+		self.frappe.session.user = "creator@example.com"
+		self.frappe.get_roles = lambda user=None: ["Employee"]
+		task = types.SimpleNamespace(
+			name="NT-2026-00001",
+			assigned_to="emp@example.com",
+			owner="creator@example.com",
+			assigned_by="creator@example.com",
+			department="Sales",
+			status="Working",
+			progress=20,
+			due_date="2026-08-01",
+			db_set=MagicMock(),
+		)
+		with (
+			patch.object(self.api, "get_task_for_user", return_value=task),
+			patch.object(self.api, "can_submit_progress_on_task", return_value=False),
+			patch.object(self.api, "get_user_department", return_value="Sales"),
+		):
+			with self.assertRaises(self.frappe.PermissionError):
+				self.api.post_task_message(
+					"NT-2026-00001",
+					"Looks done",
+					update_type="Progress Update",
+					status="Completed",
+					progress=100,
+				)
+
 	def test_display_role_and_css_helpers(self):
 		self.assertEqual(
 			get_display_role(
@@ -366,6 +395,80 @@ class TestTimelineEnrichment(unittest.TestCase):
 		)
 		self.assertEqual(css_class_for_update_type("Internal Note"), "nt-type-internal")
 		self.assertEqual(css_class_for_update_type("Manager Instruction"), "nt-type-manager")
+
+
+class TestDirectUpdateTypeGuards(unittest.TestCase):
+	"""P1: privileged timeline types blocked on direct DocType inserts."""
+
+	def setUp(self):
+		self.frappe = _install_fake_frappe()
+		import importlib
+
+		import project_custom.project_custom.doctype.nave_task_update.nave_task_update as mod
+
+		importlib.reload(mod)
+		self.mod = mod
+
+	def _doc(self, update_type, *, ignore_permissions=False):
+		doc = self.mod.NAVETaskUpdate()
+		doc.update_type = update_type
+		doc.task = "NT-2026-00001"
+		doc.status = "Working"
+		doc.progress = 10
+		doc.flags = types.SimpleNamespace(
+			ignore_permissions=ignore_permissions,
+			allow_privileged_nave_update_type=False,
+		)
+		return doc
+
+	def test_employee_cannot_forge_system_update_type(self):
+		self.frappe.session.user = "emp@example.com"
+		self.frappe.get_roles = lambda user=None: ["Employee"]
+		doc = self._doc("System")
+		with self.assertRaises(self.frappe.PermissionError):
+			doc.validate_update_type_permission()
+
+	def test_employee_cannot_forge_reassignment_or_close(self):
+		self.frappe.session.user = "emp@example.com"
+		self.frappe.get_roles = lambda user=None: ["Employee"]
+		for update_type in ("Reassignment", "Close", "Status Change", "Recurrence Event"):
+			doc = self._doc(update_type)
+			with self.assertRaises(self.frappe.PermissionError):
+				doc.validate_update_type_permission()
+
+	def test_employee_cannot_forge_manager_instruction(self):
+		self.frappe.session.user = "emp@example.com"
+		self.frappe.get_roles = lambda user=None: ["Employee"]
+		doc = self._doc("Manager Instruction")
+		with self.assertRaises(self.frappe.PermissionError):
+			doc.validate_update_type_permission()
+
+	def test_trusted_insert_allows_system_type(self):
+		self.frappe.session.user = "emp@example.com"
+		self.frappe.get_roles = lambda user=None: ["Employee"]
+		doc = self._doc("System", ignore_permissions=True)
+		doc.validate_update_type_permission()  # does not raise
+
+	def test_employee_cannot_direct_insert_progress_without_assignment(self):
+		self.frappe.session.user = "creator@example.com"
+		self.frappe.get_roles = lambda user=None: ["Employee"]
+		task = types.SimpleNamespace(
+			assigned_to="emp@example.com",
+			owner="creator@example.com",
+			assigned_by="creator@example.com",
+			department="Sales",
+		)
+		doc = self._doc("Progress Update")
+		with (
+			patch.object(self.frappe.db, "get_value", return_value=task),
+			patch(
+				"project_custom.project_custom.doctype.nave_task_update.nave_task_update._employee_department",
+				return_value="Sales",
+			),
+		):
+			with self.assertRaises(self.frappe.PermissionError) as ctx:
+				doc.validate_update_type_permission()
+		self.assertIn("progress updates", str(ctx.exception).lower())
 
 
 class TestAssetsAndPatches(unittest.TestCase):

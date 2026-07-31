@@ -211,7 +211,11 @@ def process_template(template_name: str, *, today=None, force_occurrence=None, s
 		occurrence = _as_date(force_occurrence)
 		result = create_generated_task(template, occurrence, source=source)
 		if result.get("created"):
-			advance_template_after_generation(template, occurrence)
+			# Advance the schedule only when generating the pending next occurrence.
+			# Ad-hoc manual dates must not skip or rewind next_creation_date.
+			pending = _as_date(template.next_creation_date)
+			if pending and occurrence == pending:
+				advance_template_after_generation(template, occurrence)
 			created.append(result)
 		else:
 			skipped.append(result)
