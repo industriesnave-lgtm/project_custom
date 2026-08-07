@@ -4,8 +4,86 @@ frappe.pages["nave-sales-dashboard"].on_page_load = function (wrapper) {
 		title: "Sales Dashboard",
 		single_column: true,
 	});
+	page.add_inner_button("← Nave Home", () => {
+		frappe.set_route("nave-home");
+	});
 
 	const currency = (value) => format_currency(value || 0);
+	const escape = (value) => frappe.utils.escape_html(String(value == null ? "" : value));
+
+	// Valid list destinations only — cards without a mapping stay non-clickable.
+	const KPI_NAV = {
+		today_sales: {
+			kind: "list",
+			doctype: "Sales Invoice",
+			filters: () => ({
+				posting_date: frappe.datetime.get_today(),
+				docstatus: 1,
+				is_return: 0,
+			}),
+		},
+		month_sales: {
+			kind: "list",
+			doctype: "Sales Invoice",
+			filters: () => {
+				const today = frappe.datetime.get_today();
+				const month_start = `${String(today).slice(0, 7)}-01`;
+				return {
+					posting_date: ["between", [month_start, today]],
+					docstatus: 1,
+					is_return: 0,
+				};
+			},
+		},
+		pending_orders: {
+			kind: "list",
+			doctype: "Sales Order",
+			filters: () => ({
+				status: ["not in", ["Completed", "Closed", "Cancelled"]],
+				docstatus: 1,
+			}),
+		},
+		pending_collection: {
+			kind: "list",
+			doctype: "Sales Invoice",
+			filters: () => ({
+				outstanding_amount: [">", 0],
+				docstatus: 1,
+				is_return: 0,
+			}),
+		},
+		overdue_amount: {
+			kind: "list",
+			doctype: "Sales Invoice",
+			filters: () => ({
+				status: "Overdue",
+				docstatus: 1,
+			}),
+		},
+		credit_note_amount: {
+			kind: "list",
+			doctype: "Sales Invoice",
+			filters: () => {
+				const today = frappe.datetime.get_today();
+				const month_start = `${String(today).slice(0, 7)}-01`;
+				return {
+					is_return: 1,
+					docstatus: 1,
+					posting_date: ["between", [month_start, today]],
+				};
+			},
+		},
+	};
+
+	const open_kpi_nav = (key) => {
+		const nav = KPI_NAV[key];
+		if (!nav || nav.kind !== "list" || !nav.doctype) {
+			return;
+		}
+		const filters = typeof nav.filters === "function" ? nav.filters() : nav.filters || {};
+		frappe.route_options = filters;
+		frappe.set_route("List", nav.doctype);
+	};
 
 	const add_styles = () => {
 		if (document.getElementById("nave-sales-dashboard-style")) return;
@@ -54,6 +132,7 @@ frappe.pages["nave-sales-dashboard"].on_page_load = function (wrapper) {
 				grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 				gap: 16px;
 				margin-bottom: 22px;
+				align-items: stretch;
 			}
 			.nave-kpi-card {
 				background: #fff;
@@ -61,7 +140,22 @@ frappe.pages["nave-sales-dashboard"].on_page_load = function (wrapper) {
 				padding: 18px;
 				border-top: 4px solid #1683d8;
 				box-shadow: 0 4px 16px rgba(23, 59, 103, 0.07);
+				min-height: 104px;
+				height: 100%;
+				display: flex;
+				flex-direction: column;
+				justify-content: space-between;
+				box-sizing: border-box;
 			}
+			.nave-kpi-card.is-clickable {
+				cursor: pointer;
+				transition: transform .12s ease, box-shadow .12s ease;
+			}
+			.nave-kpi-card.is-clickable:hover {
+				transform: translateY(-1px);
+				box-shadow: 0 8px 20px rgba(23, 59, 103, 0.12);
+			}
+			.nave-kpi-card.is-static { cursor: default; }
 			.nave-kpi-card.success { border-top-color: #16a36a; }
 			.nave-kpi-card.alert { border-top-color: #e34b4b; }
 			.nave-kpi-card.warning { border-top-color: #f59e0b; }
@@ -69,12 +163,14 @@ frappe.pages["nave-sales-dashboard"].on_page_load = function (wrapper) {
 				color: #64748b;
 				font-size: 13px;
 				font-weight: 600;
+				line-height: 1.3;
 			}
 			.nave-kpi-value {
 				color: #173b67;
 				font-size: 27px;
 				font-weight: 700;
 				margin-top: 10px;
+				line-height: 1.2;
 			}
 			.nave-panel {
 				background: #fff;
@@ -96,6 +192,7 @@ frappe.pages["nave-sales-dashboard"].on_page_load = function (wrapper) {
 				padding: 12px 8px;
 				border-bottom: 1px solid #eef1f6;
 				text-align: left;
+				vertical-align: top;
 			}
 			.nave-invoice-table th {
 				color: #64748b;
@@ -115,39 +212,46 @@ frappe.pages["nave-sales-dashboard"].on_page_load = function (wrapper) {
 				.nave-dashboard-header { align-items: flex-start; }
 				.nave-logo { width: 110px; }
 				.nave-dashboard-title { font-size: 20px; }
+				.nave-kpi-grid { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
 			}
 		</style>`).appendTo("head");
 	};
 
 	const render_dashboard = (data) => {
 		const cards = [
-			["Today Sales", currency(data.today_sales), "success"],
-			["This Month Sales", currency(data.month_sales), ""],
-			["Pending Sales Order", data.pending_orders || 0, "warning"],
-			["Pending Collection", currency(data.pending_collection), "warning"],
-			["Overdue Payment", currency(data.overdue_amount), "alert"],
-			["Credit Note (This Month)", currency(data.credit_note_amount), "alert"],
+			["today_sales", "Today Sales", currency(data.today_sales), "success"],
+			["month_sales", "This Month Sales", currency(data.month_sales), ""],
+			["pending_orders", "Pending Sales Order", data.pending_orders || 0, "warning"],
+			["pending_collection", "Pending Collection", currency(data.pending_collection), "warning"],
+			["overdue_amount", "Overdue Payment", currency(data.overdue_amount), "alert"],
+			["credit_note_amount", "Credit Note (This Month)", currency(data.credit_note_amount), "alert"],
 		];
 
 		const card_html = cards
-			.map(
-				([label, value, tone]) => `
-					<div class="nave-kpi-card ${tone}">
-						<div class="nave-kpi-label">${label}</div>
+			.map(([key, label, value, tone]) => {
+				const clickable = KPI_NAV[key] ? "is-clickable" : "is-static";
+				const attrs = KPI_NAV[key]
+					? ` data-kpi="${escape(key)}" role="button" tabindex="0"`
+					: "";
+				return `
+					<div class="nave-kpi-card ${tone} ${clickable}"${attrs}>
+						<div class="nave-kpi-label">${escape(label)}</div>
 						<div class="nave-kpi-value">${value}</div>
-					</div>`
-			)
+					</div>`;
+			})
 			.join("");
 
 		const invoice_rows = (data.recent_invoices || [])
 			.map(
 				(invoice) => `
 					<tr>
-						<td><a href="/app/sales-invoice/${invoice.name}">${invoice.name}</a></td>
-						<td>${frappe.utils.escape_html(invoice.customer || "")}</td>
+						<td><a href="/app/sales-invoice/${encodeURIComponent(
+							invoice.name || ""
+						)}">${escape(invoice.name)}</a></td>
+						<td>${escape(invoice.customer || "")}</td>
 						<td>${currency(invoice.grand_total)}</td>
 						<td>${currency(invoice.outstanding_amount)}</td>
-						<td><span class="nave-status">${invoice.status || ""}</span></td>
+						<td><span class="nave-status">${escape(invoice.status || "")}</span></td>
 					</tr>`
 			)
 			.join("");
@@ -165,7 +269,7 @@ frappe.pages["nave-sales-dashboard"].on_page_load = function (wrapper) {
 							<div class="nave-dashboard-subtitle">Nave Industries sales performance overview</div>
 						</div>
 					</div>
-					<button class="btn btn-primary nave-refresh">Refresh</button>
+					<button class="btn btn-primary nave-refresh" type="button">Refresh</button>
 				</div>
 
 				<div class="nave-kpi-grid">${card_html}</div>
@@ -189,6 +293,9 @@ frappe.pages["nave-sales-dashboard"].on_page_load = function (wrapper) {
 		`);
 
 		page.main.find(".nave-refresh").on("click", load_dashboard);
+		page.main.off("click.naveSalesKpi").on("click.naveSalesKpi", ".nave-kpi-card.is-clickable", function () {
+			open_kpi_nav($(this).data("kpi"));
+		});
 	};
 
 	const load_dashboard = () => {

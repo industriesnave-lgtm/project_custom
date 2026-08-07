@@ -47,6 +47,40 @@ frappe.project_custom.mount_nave_task_dashboard = function ($container, options)
 		total: "",
 	};
 
+	// Valid destinations only — cards without a mapping stay non-clickable.
+	const KPI_NAV = {
+		open: { kind: "view", view: "all_tasks", status: "Open" },
+		working: { kind: "view", view: "all_tasks", status: "Working" },
+		pending: { kind: "view", view: "all_tasks", status: "Pending" },
+		completed: { kind: "report", report: "NAVE Completed Task Report" },
+		closed: { kind: "view", view: "all_tasks", status: "Closed" },
+		overdue: { kind: "report", report: "NAVE Overdue Tasks" },
+		due_today: { kind: "view", view: "all_tasks", due_date: "today" },
+		due_tomorrow: { kind: "view", view: "all_tasks", due_date: "tomorrow" },
+		high_priority: { kind: "view", view: "all_tasks", priority: "High" },
+		completed_today: { kind: "report", report: "NAVE Completed Task Report" },
+		// total / active: no single unambiguous filtered destination
+	};
+
+	const REPORT_SHORTCUTS = [
+		{ label: __("My Tasks"), report: "NAVE My Tasks" },
+		{ label: __("Overdue Tasks"), report: "NAVE Overdue Tasks" },
+		{ label: __("Completed Tasks"), report: "NAVE Completed Task Report" },
+		{ label: __("Department Report"), report: "NAVE Department Task Report" },
+		{ label: __("Project Report"), report: "NAVE Project Task Report" },
+		{ label: __("Employee Performance"), report: "NAVE Employee Performance Report" },
+		{ label: __("Weekly Summary"), report: "NAVE Weekly Task Summary" },
+		{ label: __("Monthly Summary"), report: "NAVE Monthly Task Summary" },
+	];
+
+	const CHART_NAV = {
+		department_performance: { kind: "report", report: "NAVE Department Task Report" },
+		project_performance: { kind: "report", report: "NAVE Project Task Report" },
+		overdue_trend: { kind: "report", report: "NAVE Overdue Tasks" },
+		monthly_trend: { kind: "report", report: "NAVE Monthly Task Summary" },
+		// status_distribution / priority_distribution: no dedicated report
+	};
+
 	const state = {
 		loading: false,
 		request_id: 0,
@@ -92,6 +126,7 @@ frappe.project_custom.mount_nave_task_dashboard = function ($container, options)
 		}
 		$(`<style id="nave-task-dashboard-style">
 			.ntd-wrap { padding: 16px; background: #f6f8fc; border-radius: 12px; min-height: calc(100vh - 100px); }
+			.ntd-wrap.ntd-embedded { min-height: 0; padding: 4px 0 12px; background: transparent; border-radius: 0; }
 			.ntd-header { display:flex; justify-content:space-between; gap:16px; align-items:center; background:#fff; padding:16px 20px; border-radius:12px; margin-bottom:14px; box-shadow:0 2px 10px rgba(23,59,103,.06); }
 			.ntd-header h2 { margin:0; color:#173b67; font-size:22px; font-weight:700; }
 			.ntd-meta { color:#748096; font-size:13px; margin-top:4px; }
@@ -100,30 +135,41 @@ frappe.project_custom.mount_nave_task_dashboard = function ($container, options)
 			.ntd-filter-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:10px; align-items:end; }
 			.ntd-filter-grid .form-group { margin-bottom:0; }
 			.ntd-filter-actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; }
-			.ntd-kpi-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:10px; margin-bottom:14px; }
-			.ntd-kpi { background:#fff; border-radius:12px; padding:14px; border-top:4px solid #1683d8; box-shadow:0 2px 10px rgba(23,59,103,.06); }
+			.ntd-kpi-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:10px; margin-bottom:14px; align-items:stretch; }
+			.ntd-kpi { background:#fff; border-radius:12px; padding:14px; border-top:4px solid #1683d8; box-shadow:0 2px 10px rgba(23,59,103,.06); min-height:88px; height:100%; display:flex; flex-direction:column; justify-content:space-between; box-sizing:border-box; }
+			.ntd-kpi.is-clickable { cursor:pointer; transition: transform .12s ease, box-shadow .12s ease; }
+			.ntd-kpi.is-clickable:hover { transform: translateY(-1px); box-shadow:0 6px 16px rgba(23,59,103,.12); }
+			.ntd-kpi.is-static { cursor:default; }
 			.ntd-kpi.success { border-top-color:#16a36a; }
 			.ntd-kpi.warning { border-top-color:#f59e0b; }
 			.ntd-kpi.alert { border-top-color:#e34b4b; }
-			.ntd-kpi-label { color:#64748b; font-size:12px; font-weight:600; }
-			.ntd-kpi-value { color:#173b67; font-size:24px; font-weight:700; margin-top:6px; }
-			.ntd-widget-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:12px; margin-bottom:14px; }
-			.ntd-panel { background:#fff; border-radius:12px; padding:14px; box-shadow:0 2px 10px rgba(23,59,103,.06); min-height:120px; }
+			.ntd-kpi-label { color:#64748b; font-size:12px; font-weight:600; line-height:1.3; }
+			.ntd-kpi-value { color:#173b67; font-size:24px; font-weight:700; margin-top:6px; line-height:1.2; }
+			.ntd-shortcut-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:10px; margin-bottom:14px; align-items:stretch; }
+			.ntd-shortcut { background:#fff; border:1px solid #e6ebf3; border-radius:10px; padding:12px 14px; text-align:left; color:#173b67; font-weight:600; font-size:13px; cursor:pointer; min-height:48px; box-shadow:0 1px 6px rgba(23,59,103,.04); }
+			.ntd-shortcut:hover { border-color:#1683d8; color:#1683d8; }
+			.ntd-widget-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:12px; margin-bottom:14px; align-items:stretch; }
+			.ntd-panel { background:#fff; border-radius:12px; padding:14px; box-shadow:0 2px 10px rgba(23,59,103,.06); min-height:120px; height:100%; display:flex; flex-direction:column; box-sizing:border-box; }
 			.ntd-panel h4 { margin:0 0 10px; color:#173b67; font-size:15px; font-weight:700; }
+			.ntd-panel.is-clickable h4 { cursor:pointer; }
+			.ntd-panel.is-clickable h4:hover { color:#1683d8; }
 			.ntd-note { color:#748096; font-size:12px; margin:0 0 8px; }
 			.ntd-table { width:100%; border-collapse:collapse; font-size:13px; }
 			.ntd-table th, .ntd-table td { padding:8px 6px; border-bottom:1px solid #eef1f6; text-align:left; vertical-align:top; }
 			.ntd-table th { color:#64748b; font-size:11px; text-transform:uppercase; }
 			.ntd-empty, .ntd-error, .ntd-loading { color:#748096; padding:12px 4px; }
 			.ntd-error { color:#b42318; }
-			.ntd-chart-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); gap:12px; }
-			.ntd-chart-box { min-height:260px; }
+			.ntd-chart-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); gap:12px; align-items:stretch; }
+			.ntd-chart-box { min-height:260px; flex:1; }
+			.ntd-widget-body { flex:1; overflow:auto; }
 			.ntd-badge { display:inline-block; padding:2px 8px; border-radius:999px; background:#eff6ff; color:#1683d8; font-size:11px; font-weight:600; }
 			.ntd-badge.Overdue, .ntd-badge.overdue { background:#fef2f2; color:#dc2626; }
 			.ntd-disabled { pointer-events:none; opacity:.65; }
 			@media (max-width: 900px) {
 				.ntd-header { flex-direction:column; align-items:flex-start; }
 				.ntd-wrap { padding:10px; }
+				.ntd-wrap.ntd-embedded { padding:0 0 10px; }
+				.ntd-kpi-grid { grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); }
 			}
 		</style>`).appendTo("head");
 	};
@@ -173,6 +219,14 @@ frappe.project_custom.mount_nave_task_dashboard = function ($container, options)
 			</div>
 			<div class="ntd-global-error ntd-error" style="display:none;"></div>
 			<div class="ntd-kpi-grid"></div>
+			<div class="ntd-shortcut-grid">
+				${REPORT_SHORTCUTS.map(
+					(s) => `
+					<button type="button" class="ntd-shortcut" data-report="${escape(s.report)}">${escape(
+						s.label
+					)}</button>`
+				).join("")}
+			</div>
 			<div class="ntd-widget-grid">
 				${WIDGETS.map(
 					(w) => `
@@ -184,14 +238,17 @@ frappe.project_custom.mount_nave_task_dashboard = function ($container, options)
 			</div>
 			<div class="ntd-chart-grid">
 				${CHARTS.map(
-					(c) => `
-					<div class="ntd-panel" data-chart="${escape(c.type)}">
+					(c) => {
+						const clickable = CHART_NAV[c.type] ? "is-clickable" : "";
+						return `
+					<div class="ntd-panel ${clickable}" data-chart="${escape(c.type)}">
 						<h4>${escape(c.title)}</h4>
 						<div class="ntd-note ntd-chart-note" style="display:none;"></div>
 						<div class="ntd-chart-box" id="ntd-chart-${escape(c.type)}">
 							<div class="ntd-loading">${__("Loading...")}</div>
 						</div>
-					</div>`
+					</div>`;
+					}
 				).join("")}
 			</div>
 		</div>
@@ -293,6 +350,26 @@ frappe.project_custom.mount_nave_task_dashboard = function ($container, options)
 		$container.find(`#ntd-chart-${chart_type}`).empty();
 	};
 
+	const open_nav = (nav) => {
+		if (!nav || typeof nav !== "object") {
+			return;
+		}
+		if (nav.kind === "report" && nav.report) {
+			frappe.set_route("query-report", nav.report);
+			return;
+		}
+		if (nav.kind === "view" && nav.view) {
+			if (typeof options.on_view_navigate === "function") {
+				options.on_view_navigate(nav);
+				return;
+			}
+			frappe.route_options = {
+				nave_tasks_nav: nav,
+			};
+			frappe.set_route("nave-tasks");
+		}
+	};
+
 	const render_kpis = (payload) => {
 		const cards = (payload && payload.card_list) || [];
 		const map = (payload && payload.cards) || {};
@@ -302,8 +379,12 @@ frappe.project_custom.mount_nave_task_dashboard = function ($container, options)
 		)
 			.map((card) => {
 				const tone = KPI_TONES[card.key] || "";
+				const nav = KPI_NAV[card.key] || null;
+				const clickable = nav ? "is-clickable" : "is-static";
+				const nav_attr = nav ? ` data-kpi="${escape(card.key)}"` : "";
+				const role = nav ? ' role="button" tabindex="0"' : "";
 				return `
-					<div class="ntd-kpi ${tone}">
+					<div class="ntd-kpi ${tone} ${clickable}"${nav_attr}${role}>
 						<div class="ntd-kpi-label">${escape(card.label || card.key)}</div>
 						<div class="ntd-kpi-value">${escape(card.value == null ? 0 : card.value)}</div>
 					</div>`;
@@ -567,6 +648,20 @@ frappe.project_custom.mount_nave_task_dashboard = function ($container, options)
 			show_filter_error("");
 			load_dashboard();
 		});
+
+		// Single delegated handler — avoid duplicate bindings on refresh.
+		$container.off("click.ntdNav").on("click.ntdNav", ".ntd-kpi.is-clickable", function () {
+			const key = $(this).data("kpi");
+			open_nav(KPI_NAV[key]);
+		});
+		$container.on("click.ntdNav", ".ntd-shortcut[data-report]", function () {
+			const report = $(this).data("report");
+			open_nav({ kind: "report", report });
+		});
+		$container.on("click.ntdNav", ".ntd-panel.is-clickable[data-chart] > h4", function () {
+			const chart_type = $(this).closest("[data-chart]").data("chart");
+			open_nav(CHART_NAV[chart_type]);
+		});
 	};
 
 	const boot = async () => {
@@ -600,6 +695,11 @@ frappe.project_custom.mount_nave_task_dashboard = function ($container, options)
 	const api = {
 		refresh: () => load_dashboard(),
 		destroy,
+		// Exposed for tests / parent page wiring.
+		KPI_NAV,
+		REPORT_SHORTCUTS,
+		CHART_NAV,
+		open_nav,
 	};
 
 	boot();
