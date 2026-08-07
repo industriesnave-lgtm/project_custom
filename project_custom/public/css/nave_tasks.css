@@ -1,4 +1,40 @@
-/* NAVE Tasks — Desk page styles (project_custom only) */
+/* NAVE Tasks — Desk page + embedded dashboard styles (project_custom only) */
+
+.ntd-wrap {
+	box-sizing: border-box;
+	width: 100%;
+	max-width: 100%;
+	overflow-x: hidden;
+}
+
+.ntd-widget-grid > *,
+.ntd-chart-grid > *,
+.ntd-kpi-grid > *,
+.ntd-shortcut-grid > * {
+	min-width: 0;
+}
+
+.ntd-panel {
+	min-width: 0;
+	overflow: hidden;
+}
+
+.ntd-widget-body {
+	min-width: 0;
+	max-height: 320px;
+	overflow-x: auto;
+	overflow-y: auto;
+}
+
+.ntd-task-title {
+	overflow-wrap: anywhere;
+	word-break: break-word;
+}
+
+.ntd-wrap.ntd-embedded .ntd-header h2 {
+	display: none;
+}
+
 
 /* Desk chrome scoped to this page only — avoid global Desk overrides */
 .nave-tasks-page-wrap .layout-main-section {

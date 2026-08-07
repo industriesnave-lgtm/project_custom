@@ -104,7 +104,7 @@ class TestSingleNavigationEntry(unittest.TestCase):
 		self.assertEqual(hooks.count('"title": "NAVE Tasks"'), 1)
 		self.assertIn('"/desk/nave-tasks"', hooks)
 		# add_to_apps_screen must not point at the legacy dashboard page.
-		apps_block = hooks.split("add_to_apps_screen")[1].split("website_redirects")[0]
+		apps_block = hooks.split("add_to_apps_screen")[1].split("extend_bootinfo")[0]
 		self.assertNotIn("nave-task-dashboard", apps_block)
 
 	def test_desktop_icon_is_nave_tasks_only(self):
@@ -146,12 +146,9 @@ class TestDashboardConsolidation(unittest.TestCase):
 		hooks = HOOKS.read_text(encoding="utf-8")
 		self.assertIn("/assets/project_custom/js/nave_task_dashboard_ui.js", hooks)
 
-	def test_standalone_page_redirects_to_nave_tasks(self):
-		js = DASHBOARD_PAGE_JS.read_text(encoding="utf-8")
-		self.assertIn('frappe.pages["nave-task-dashboard"].on_page_load', js)
-		self.assertIn('frappe.set_route("nave-tasks")', js)
-		self.assertNotIn("mount_nave_task_dashboard", js)
-		self.assertNotIn("get_task_dashboard_kpi_cards", js)
+	def test_standalone_page_permanently_removed(self):
+		self.assertFalse(DASHBOARD_PAGE_JS.exists())
+		self.assertFalse(DASHBOARD_PAGE_JSON.exists())
 
 
 class TestTaskTabsStillWired(unittest.TestCase):
@@ -256,9 +253,8 @@ class TestNoCoreModification(unittest.TestCase):
 
 	def test_page_routes_unchanged(self):
 		tasks = json.loads(NAVE_TASKS_JSON.read_text(encoding="utf-8"))
-		dash = json.loads(DASHBOARD_PAGE_JSON.read_text(encoding="utf-8"))
 		self.assertEqual(tasks["name"], "nave-tasks")
-		self.assertEqual(dash["name"], "nave-task-dashboard")
+		self.assertFalse(DASHBOARD_PAGE_JSON.exists())
 
 
 if __name__ == "__main__":

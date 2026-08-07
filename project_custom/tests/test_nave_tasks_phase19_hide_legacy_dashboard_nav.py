@@ -1,4 +1,4 @@
-"""Hide legacy NAVE Task Dashboard from sidebar / Awesome Bar (nav-only fix)."""
+"""Permanent removal of legacy NAVE Task Dashboard Page."""
 
 from __future__ import annotations
 
@@ -52,6 +52,7 @@ def _install_fake_frappe():
 
 	frappe.parse_json = lambda v: _json.loads(v) if isinstance(v, str) else (v or {})
 	frappe.get_doc = lambda *a, **k: types.SimpleNamespace(insert=lambda **kw: None)
+	frappe.delete_doc = lambda *a, **k: None
 
 	utils = types.ModuleType("frappe.utils")
 	utils.nowdate = lambda: "2026-07-29"
@@ -76,13 +77,23 @@ def _install_fake_frappe():
 _install_fake_frappe()
 
 PAGE_DIR = WORKSPACE / "project_custom" / "project_custom" / "page"
-DASHBOARD_JSON = PAGE_DIR / "nave_task_dashboard" / "nave_task_dashboard.json"
-DASHBOARD_JS = PAGE_DIR / "nave_task_dashboard" / "nave_task_dashboard.js"
+DASHBOARD_DIR = PAGE_DIR / "nave_task_dashboard"
+DASHBOARD_JSON = DASHBOARD_DIR / "nave_task_dashboard.json"
+DASHBOARD_JS = DASHBOARD_DIR / "nave_task_dashboard.js"
 NAVE_TASKS_JSON = PAGE_DIR / "nave_tasks" / "nave_tasks.json"
 NAVE_TASKS_JS = PAGE_DIR / "nave_tasks" / "nave_tasks.js"
 HOOKS = WORKSPACE / "project_custom" / "hooks.py"
 REDIRECT_JS = WORKSPACE / "project_custom" / "public" / "js" / "role_dashboard_redirect.js"
 DESKTOP_ICON = WORKSPACE / "project_custom" / "desktop_icon" / "nave_tasks.json"
+PATCHES = WORKSPACE / "project_custom" / "patches.txt"
+PATCH_FILE = (
+	WORKSPACE
+	/ "project_custom"
+	/ "patches"
+	/ "v1_7"
+	/ "delete_nave_task_dashboard_page.py"
+)
+INSTALL = WORKSPACE / "project_custom" / "install.py"
 
 VISIBLE_NAV_ROLES = {
 	"Employee",
@@ -92,14 +103,77 @@ VISIBLE_NAV_ROLES = {
 }
 
 
-class TestStandaloneHiddenFromNavigation(unittest.TestCase):
-	def test_standalone_page_not_assigned_to_visible_roles(self):
-		page = json.loads(DASHBOARD_JSON.read_text(encoding="utf-8"))
-		roles = {row["role"] for row in page.get("roles") or []}
-		self.assertTrue(roles, "empty roles would expose the page to everyone")
-		self.assertTrue(roles.isdisjoint(VISIBLE_NAV_ROLES))
-		self.assertEqual(roles, {"NAVE Task Internal Redirect"})
+class TestLegacyPagePermanentlyRemoved(unittest.TestCase):
+	def test_source_files_deleted(self):
+		self.assertFalse(DASHBOARD_JSON.exists())
+		self.assertFalse(DASHBOARD_JS.exists())
 
+	def test_patch_deletes_only_legacy_page(self):
+		self.assertTrue(PATCH_FILE.exists())
+		text = PATCH_FILE.read_text(encoding="utf-8")
+		self.assertIn('page_name = "nave-task-dashboard"', text)
+		self.assertIn("frappe.delete_doc", text)
+		self.assertIn('"Page"', text)
+		self.assertNotIn("nave-tasks", text.split("delete_doc")[1] if "delete_doc" in text else "")
+		patches = PATCHES.read_text(encoding="utf-8")
+		self.assertIn(
+			"project_custom.patches.v1_7.delete_nave_task_dashboard_page",
+			patches,
+		)
+
+	def test_patch_execute_deletes_when_exists(self):
+		frappe = _install_fake_frappe()
+		deleted = []
+
+		def exists(doctype, name=None, **kwargs):
+			if doctype == "Page" and name == "nave-task-dashboard":
+				return True
+			return False
+
+		def delete_doc(doctype, name, **kwargs):
+			deleted.append((doctype, name, kwargs.get("force"), kwargs.get("ignore_permissions")))
+
+		frappe.db.exists = exists
+		frappe.delete_doc = delete_doc
+
+		from project_custom.patches.v1_7.delete_nave_task_dashboard_page import execute
+
+		execute()
+		self.assertEqual(deleted, [("Page", "nave-task-dashboard", 1, True)])
+
+	def test_no_website_redirects_for_legacy_page(self):
+		hooks = HOOKS.read_text(encoding="utf-8")
+		self.assertNotIn("nave-task-dashboard", hooks)
+
+	def test_redirect_js_no_longer_keeps_legacy_page_alive(self):
+		js = REDIRECT_JS.read_text(encoding="utf-8")
+		self.assertNotIn("nave-task-dashboard", js)
+		self.assertIn("/desk/nave-home", js)
+
+	def test_sentinel_role_logic_removed_from_install(self):
+		install = INSTALL.read_text(encoding="utf-8")
+		self.assertNotIn("NAVE Task Internal Redirect", install)
+		self.assertNotIn("ensure_nave_task_internal_redirect_role", install)
+
+	def test_bootinfo_still_strips_stale_page_info_until_migrate(self):
+		hooks = HOOKS.read_text(encoding="utf-8")
+		self.assertIn('extend_bootinfo = "project_custom.boot.extend_bootinfo"', hooks)
+		from project_custom.boot import extend_bootinfo
+
+		boot = {
+			"page_info": {
+				"nave-task-dashboard": {"title": "x"},
+				"nave-tasks": {"title": "NAVE Tasks"},
+			},
+			"allowed_pages": ["nave-task-dashboard", "nave-tasks"],
+		}
+		extend_bootinfo(boot)
+		self.assertNotIn("nave-task-dashboard", boot["page_info"])
+		self.assertIn("nave-tasks", boot["page_info"])
+		self.assertEqual(boot["allowed_pages"], ["nave-tasks"])
+
+
+class TestNaveTasksStillAccessible(unittest.TestCase):
 	def test_nave_tasks_page_still_visible_to_app_roles(self):
 		page = json.loads(NAVE_TASKS_JSON.read_text(encoding="utf-8"))
 		roles = {row["role"] for row in page.get("roles") or []}
@@ -111,54 +185,6 @@ class TestStandaloneHiddenFromNavigation(unittest.TestCase):
 		self.assertEqual(icon["link"], "/desk/nave-tasks")
 		self.assertNotIn("nave-task-dashboard", icon["link"])
 
-
-class TestRedirectPreserved(unittest.TestCase):
-	def test_page_js_redirects_to_nave_tasks(self):
-		js = DASHBOARD_JS.read_text(encoding="utf-8")
-		self.assertIn('frappe.set_route("nave-tasks")', js)
-		self.assertIn('frappe.pages["nave-task-dashboard"].on_page_load', js)
-
-	def test_app_include_redirects_legacy_urls(self):
-		js = REDIRECT_JS.read_text(encoding="utf-8")
-		self.assertIn("nave-task-dashboard", js)
-		self.assertIn("/desk/nave-tasks", js)
-		self.assertIn("window.location.replace", js)
-
-	def test_website_redirects_configured(self):
-		hooks = HOOKS.read_text(encoding="utf-8")
-		self.assertIn("website_redirects", hooks)
-		self.assertIn("/app/nave-task-dashboard", hooks)
-		self.assertIn("/desk/nave-task-dashboard", hooks)
-		self.assertIn('"/app/nave-tasks"', hooks)
-		self.assertIn('"/desk/nave-tasks"', hooks)
-
-	def test_before_migrate_ensures_sentinel_role(self):
-		hooks = HOOKS.read_text(encoding="utf-8")
-		self.assertIn('before_migrate = "project_custom.install.before_migrate"', hooks)
-		install = (WORKSPACE / "project_custom" / "install.py").read_text(encoding="utf-8")
-		self.assertIn('NAVE_TASK_INTERNAL_REDIRECT_ROLE = "NAVE Task Internal Redirect"', install)
-
-	def test_bootinfo_strips_legacy_dashboard_page(self):
-		hooks = HOOKS.read_text(encoding="utf-8")
-		self.assertIn('extend_bootinfo = "project_custom.boot.extend_bootinfo"', hooks)
-		from project_custom.boot import extend_bootinfo
-
-		boot = {
-			"page_info": {"nave-task-dashboard": {"title": "x"}, "nave-tasks": {"title": "NAVE Tasks"}},
-			"allowed_pages": ["nave-task-dashboard", "nave-tasks"],
-		}
-		extend_bootinfo(boot)
-		self.assertNotIn("nave-task-dashboard", boot["page_info"])
-		self.assertIn("nave-tasks", boot["page_info"])
-		self.assertEqual(boot["allowed_pages"], ["nave-tasks"])
-
-	def test_legacy_page_title_not_dashboard_label(self):
-		page = json.loads(DASHBOARD_JSON.read_text(encoding="utf-8"))
-		self.assertNotEqual(page.get("title"), "NAVE Task Dashboard")
-		self.assertEqual(page.get("system_page"), 1)
-
-
-class TestNaveTasksStillAccessible(unittest.TestCase):
 	def test_nave_tasks_route_and_tabs(self):
 		page = json.loads(NAVE_TASKS_JSON.read_text(encoding="utf-8"))
 		self.assertEqual(page["name"], "nave-tasks")
@@ -174,20 +200,6 @@ class TestNaveTasksStillAccessible(unittest.TestCase):
 		):
 			self.assertIn(f'id: "{view_id}"', js)
 		self.assertIn("mount_nave_task_dashboard", js)
-
-
-class TestDashboardApisUnchanged(unittest.TestCase):
-	def test_api_methods_still_importable(self):
-		from project_custom.api import nave_task_dashboard as api
-
-		for name in (
-			"get_task_dashboard_metadata",
-			"get_task_dashboard_kpi_cards",
-			"get_task_dashboard_widget",
-			"get_task_dashboard_chart",
-			"get_task_dashboard_summary",
-		):
-			self.assertTrue(callable(getattr(api, name, None)), name)
 
 
 if __name__ == "__main__":

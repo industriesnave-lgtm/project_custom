@@ -7,6 +7,40 @@ frappe.pages["customer-feedback-dashboard"].on_page_load = function (wrapper) {
 	page.add_inner_button("← Nave Home", () => {
 		frappe.set_route("nave-home");
 	});
+	const KPI_NAV = {
+		total_feedback: {
+			kind: "list",
+			doctype: "Customer Feedback",
+			filters: () => ({}),
+		},
+		positive_feedback: {
+			kind: "list",
+			doctype: "Customer Feedback",
+			filters: () => ({ follow_up_status: "Positive" }),
+		},
+		low_rating: {
+			kind: "list",
+			doctype: "Customer Feedback",
+			filters: () => ({ follow_up_status: "Urgent" }),
+		},
+		google_review_pending: {
+			kind: "list",
+			doctype: "Customer Feedback",
+			filters: () => ({ google_review_status: "Pending" }),
+		},
+		// average_rating: no meaningful single list destination
+	};
+
+	const open_kpi_nav = (nav) => {
+		if (!nav || nav.kind !== "list" || !nav.doctype) {
+			return;
+		}
+		const filters =
+			typeof nav.filters === "function" ? nav.filters() : nav.filters || {};
+		frappe.route_options = filters;
+		frappe.set_route("List", nav.doctype);
+	};
+
 	const escape = (value) =>
 		frappe.utils.escape_html(String(value || ""));
 
@@ -64,6 +98,17 @@ frappe.pages["customer-feedback-dashboard"].on_page_load = function (wrapper) {
 				border-top: 4px solid #1683d8;
 				border-radius: 13px;
 				box-shadow: 0 5px 18px rgba(18, 59, 104, 0.07);
+			}
+			.feedback-kpi.is-clickable {
+				cursor: pointer;
+				transition: transform 0.12s ease, box-shadow 0.12s ease;
+			}
+			.feedback-kpi.is-clickable:hover {
+				transform: translateY(-1px);
+				box-shadow: 0 8px 20px rgba(18, 59, 104, 0.12);
+			}
+			.feedback-kpi.is-static {
+				cursor: default;
 			}
 			.feedback-kpi.success { border-top-color: #16a36a; }
 			.feedback-kpi.warning { border-top-color: #f59e0b; }
@@ -265,31 +310,31 @@ frappe.pages["customer-feedback-dashboard"].on_page_load = function (wrapper) {
 				</div>
 
 				<div class="feedback-kpi-grid">
-					<div class="feedback-kpi">
+					<div class="feedback-kpi is-clickable" data-kpi="total_feedback" role="button" tabindex="0">
 						<div class="feedback-kpi-label">Total Feedback</div>
 						<div class="feedback-kpi-value">
 							${data.total_feedback || 0}
 						</div>
 					</div>
-					<div class="feedback-kpi success">
+					<div class="feedback-kpi success is-static">
 						<div class="feedback-kpi-label">Average Rating</div>
 						<div class="feedback-kpi-value">
 							${data.average_rating || 0} / 5
 						</div>
 					</div>
-					<div class="feedback-kpi success">
+					<div class="feedback-kpi success is-clickable" data-kpi="positive_feedback" role="button" tabindex="0">
 						<div class="feedback-kpi-label">Positive Feedback</div>
 						<div class="feedback-kpi-value">
 							${data.positive_feedback_percent || 0}%
 						</div>
 					</div>
-					<div class="feedback-kpi alert">
+					<div class="feedback-kpi alert is-clickable" data-kpi="low_rating" role="button" tabindex="0">
 						<div class="feedback-kpi-label">Low Rating</div>
 						<div class="feedback-kpi-value">
 							${data.low_rating_count || 0}
 						</div>
 					</div>
-					<div class="feedback-kpi warning">
+					<div class="feedback-kpi warning is-clickable" data-kpi="google_review_pending" role="button" tabindex="0">
 						<div class="feedback-kpi-label">Google Review Pending</div>
 						<div class="feedback-kpi-value">
 							${data.google_review_pending || 0}
@@ -358,6 +403,13 @@ frappe.pages["customer-feedback-dashboard"].on_page_load = function (wrapper) {
 		`);
 
 		page.main.find(".feedback-refresh").on("click", loadDashboard);
+
+		page.main
+			.off("click.feedbackKpi")
+			.on("click.feedbackKpi", ".feedback-kpi.is-clickable", function () {
+				const key = $(this).attr("data-kpi");
+				open_kpi_nav(KPI_NAV[key]);
+			});
 
 		page.main.find(".feedback-route-link").on("click", function (e) {
 			const raw = $(this).attr("data-route");

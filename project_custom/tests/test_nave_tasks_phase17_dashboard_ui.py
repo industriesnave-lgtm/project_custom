@@ -107,40 +107,14 @@ FILTER_KEYS = (
 
 
 class TestPageRouteAndConfig(unittest.TestCase):
-	def test_page_route_exists(self):
-		self.assertTrue(PAGE_JSON.exists(), "Page JSON missing")
-		self.assertTrue(PAGE_JS.exists(), "Page JS missing")
-		page = json.loads(PAGE_JSON.read_text(encoding="utf-8"))
-		self.assertEqual(page["name"], "nave-task-dashboard")
-		self.assertEqual(page["page_name"], "nave-task-dashboard")
-		self.assertEqual(page["title"], "NAVE Tasks Redirect")
-		self.assertEqual(page.get("system_page"), 1)
-		self.assertEqual(page["module"], "Project Custom")
-		self.assertEqual(page["standard"], "Yes")
+	def test_legacy_standalone_page_source_removed(self):
+		self.assertFalse(PAGE_JSON.exists(), "Legacy page JSON must be deleted")
+		self.assertFalse(PAGE_JS.exists(), "Legacy page JS must be deleted")
 
-	def test_page_roles_hide_from_normal_navigation(self):
-		"""Legacy page keeps a sentinel role only — not Employee/Manager/Director.
-
-		Frappe lists Pages with matching Has Role rows in Awesome Bar / search.
-		Pages with zero roles are visible to everyone, so a sentinel role that
-		nobody is assigned is used to hide the standalone dashboard entry.
-		"""
-		page = json.loads(PAGE_JSON.read_text(encoding="utf-8"))
-		roles = {row["role"] for row in page.get("roles") or []}
-		self.assertEqual(roles, {"NAVE Task Internal Redirect"})
-		self.assertNotIn("Employee", roles)
-		self.assertNotIn("NAVE Task Manager", roles)
-		self.assertNotIn("NAVE Task Director", roles)
-		self.assertNotIn("System Manager", roles)
-
-	def test_page_js_registers_route_handler(self):
-		js = PAGE_JS.read_text(encoding="utf-8")
-		self.assertIn('frappe.pages["nave-task-dashboard"].on_page_load', js)
-		self.assertIn("frappe.ui.make_app_page", js)
-		# Phase 4.5: standalone page redirects into consolidated NAVE Tasks.
-		self.assertIn('frappe.set_route("nave-tasks")', js)
+	def test_shared_dashboard_ui_still_registers(self):
 		self.assertTrue(UI_JS.exists(), "Shared dashboard UI missing")
 		self.assertIn("mount_nave_task_dashboard", UI_JS.read_text(encoding="utf-8"))
+		self.assertIn('frappe.project_custom.mount_nave_task_dashboard', UI_JS.read_text(encoding="utf-8"))
 
 
 class TestApiMethodContracts(unittest.TestCase):
