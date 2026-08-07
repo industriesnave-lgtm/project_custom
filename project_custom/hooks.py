@@ -49,13 +49,8 @@ add_to_apps_screen = [
     }
 ]
 
-# Keep legacy dashboard URLs working without exposing the standalone Page in search.
-website_redirects = [
-	{"source": "/app/nave-task-dashboard", "target": "/app/nave-tasks"},
-	{"source": "/desk/nave-task-dashboard", "target": "/desk/nave-tasks"},
-]
-
-# Strip legacy page from Awesome Bar / boot page_info (Administrator still gets all roles).
+# Legacy dashboard Page source is removed; v1_7 patch deletes the DB record.
+# Bootinfo strip remains as a short-lived defensive guard until migrate runs.
 extend_bootinfo = "project_custom.boot.extend_bootinfo"
 # Includes in <head>
 # ------------------

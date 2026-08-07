@@ -8,9 +8,8 @@ LEGACY_DASHBOARD_PAGE = "nave-task-dashboard"
 
 def extend_bootinfo(bootinfo=None):
 	"""
-	Hide the legacy standalone NAVE Task Dashboard from Desk search / page_info.
-	The consolidated entry remains `nave-tasks` (NAVE Tasks).
-	URL redirects in hooks + role_dashboard_redirect.js keep bookmarks working.
+	Defensive cleanup until migrate deletes the DB Page record.
+	After v1_7.delete_nave_task_dashboard_page, this is a no-op.
 	"""
 	if bootinfo is None:
 		return
@@ -19,7 +18,6 @@ def extend_bootinfo(bootinfo=None):
 	if isinstance(page_info, dict):
 		page_info.pop(LEGACY_DASHBOARD_PAGE, None)
 
-	# Some Frappe builds also expose allowed pages as a list.
 	allowed_pages = bootinfo.get("allowed_pages")
 	if isinstance(allowed_pages, list):
 		bootinfo["allowed_pages"] = [

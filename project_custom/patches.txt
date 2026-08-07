@@ -11,3 +11,4 @@ project_custom.patches.v1_2.create_nave_sales_dashboard_page
 project_custom.patches.v1_4.backfill_nave_task_update_type
 project_custom.patches.v1_5.ensure_nave_task_recurrence_defaults
 project_custom.patches.v1_5.normalize_support_required_values
+project_custom.patches.v1_7.delete_nave_task_dashboard_page

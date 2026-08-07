@@ -50,13 +50,13 @@ class TestNaveDashboardCardRoutes(unittest.TestCase):
 		cls.js = NTD_UI.read_text(encoding="utf-8")
 		cls.reports = _report_names()
 
-	def test_kpi_nav_maps_valid_reports_or_views(self):
+	def test_kpi_nav_maps_valid_reports_or_lists(self):
 		self.assertIn("const KPI_NAV = {", self.js)
 		self.assertIn('report: "NAVE Overdue Tasks"', self.js)
-		self.assertIn('report: "NAVE Completed Task Report"', self.js)
-		self.assertIn('view: "all_tasks"', self.js)
+		self.assertIn('doctype: "NAVE Task"', self.js)
+		self.assertIn('status: "Open"', self.js)
 		self.assertIn("NAVE Overdue Tasks", self.reports)
-		self.assertIn("NAVE Completed Task Report", self.reports)
+		self.assertIn('frappe.set_route("List", nav.doctype)', self.js)
 
 	def test_total_and_active_not_forced_clickable(self):
 		# Ambiguous KPIs stay without KPI_NAV entries (comment documents why).
@@ -88,11 +88,12 @@ class TestNaveDashboardCardRoutes(unittest.TestCase):
 
 
 class TestNaveDashboardParentWiring(unittest.TestCase):
-	def test_embedded_mount_passes_view_navigate(self):
+	def test_embedded_mount_still_wires_shared_renderer(self):
 		js = NAVE_TASKS_JS.read_text(encoding="utf-8")
-		self.assertIn("on_view_navigate: apply_dashboard_nav", js)
-		self.assertIn("const apply_dashboard_nav = (nav) =>", js)
+		self.assertIn("mount_nave_task_dashboard", js)
+		self.assertIn("embedded: true", js)
 		self.assertIn('frappe.set_route("query-report"', NTD_UI.read_text(encoding="utf-8"))
+		self.assertIn('frappe.set_route("List", nav.doctype)', NTD_UI.read_text(encoding="utf-8"))
 
 
 class TestSalesDashboardCardRoutes(unittest.TestCase):
