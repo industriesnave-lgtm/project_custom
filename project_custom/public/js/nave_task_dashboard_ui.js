@@ -394,7 +394,7 @@ frappe.project_custom.mount_nave_task_dashboard = function ($container, options)
 	};
 
 	const task_link = (name, title) => {
-		const route = `/app/nave-task/${encodeURIComponent(name || "")}`;
+		const route = frappe.utils.get_form_link("NAVE Task", name || "");
 		return `<a href="${route}">${escape(title || name || "")}</a>`;
 	};
 

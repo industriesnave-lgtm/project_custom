@@ -75,6 +75,10 @@ frappe.pages["nave-tasks"].on_page_load = function (wrapper) {
 		document.head.appendChild(link);
 	};
 
+	const mark_page_shell = () => {
+		$(wrapper).addClass("nave-tasks-page-wrap");
+	};
+
 	const current_user = () => frappe.session.user;
 
 	const is_admin = () =>
@@ -1065,7 +1069,8 @@ frappe.pages["nave-tasks"].on_page_load = function (wrapper) {
 					);
 				}
 				action_buttons.push(
-					`<a class="btn btn-default btn-sm" href="/app/nave-task/${encodeURIComponent(
+					`<a class="btn btn-default btn-sm" href="${frappe.utils.get_form_link(
+						"NAVE Task",
 						task.name
 					)}" target="_blank" rel="noopener">Open Full Form</a>`
 				);
@@ -1642,6 +1647,7 @@ frappe.pages["nave-tasks"].on_page_load = function (wrapper) {
 	};
 
 	ensure_styles();
+	mark_page_shell();
 	shell();
 	bootstrap_department();
 	set_view("dashboard");

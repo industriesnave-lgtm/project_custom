@@ -197,7 +197,8 @@ class TestDeskHomeIconConfig(unittest.TestCase):
 	def test_nave_home_lists_nave_tasks_first(self):
 		js = NAVE_HOME_JS.read_text(encoding="utf-8")
 		self.assertIn('title: "NAVE Tasks"', js)
-		self.assertIn('route: "/desk/nave-tasks"', js)
+		self.assertIn('route: ["nave-tasks"]', js)
+		self.assertIn('href: "/desk/nave-tasks"', js)
 		# First card in the cards array should be NAVE Tasks.
 		idx_cards = js.find("const cards = [")
 		idx_nave = js.find('title: "NAVE Tasks"', idx_cards)
