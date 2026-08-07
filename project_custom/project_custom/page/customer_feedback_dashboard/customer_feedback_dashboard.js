@@ -405,8 +405,18 @@ frappe.pages["customer-feedback-dashboard"].on_page_load = function (wrapper) {
 		page.main.find(".feedback-refresh").on("click", loadDashboard);
 
 		page.main
-			.off("click.feedbackKpi")
+			.off("click.feedbackKpi keydown.feedbackKpi")
 			.on("click.feedbackKpi", ".feedback-kpi.is-clickable", function () {
+				const key = $(this).attr("data-kpi");
+				open_kpi_nav(KPI_NAV[key]);
+			})
+			.on("keydown.feedbackKpi", ".feedback-kpi.is-clickable", function (e) {
+				if (e.key !== "Enter" && e.key !== " ") {
+					return;
+				}
+				if (e.key === " ") {
+					e.preventDefault();
+				}
 				const key = $(this).attr("data-kpi");
 				open_kpi_nav(KPI_NAV[key]);
 			});

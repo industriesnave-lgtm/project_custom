@@ -98,7 +98,7 @@ frappe.project_custom.mount_nave_task_dashboard = function ($container, options)
 			filters: () => {
 				const today = frappe.datetime.get_today();
 				return {
-					status: "Completed",
+					status: ["in", ["Completed", "Closed"]],
 					completed_on: ["between", [`${today} 00:00:00`, `${today} 23:59:59`]],
 				};
 			},
