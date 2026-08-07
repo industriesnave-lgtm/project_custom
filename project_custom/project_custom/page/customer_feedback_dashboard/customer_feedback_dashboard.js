@@ -223,7 +223,11 @@ frappe.pages["customer-feedback-dashboard"].on_page_load = function (wrapper) {
 				return `
 					<tr>
 						<td>
-							<a href="/app/customer-feedback/${item.name}">
+							<a class="feedback-doc-link" href="/desk/customer-feedback/${encodeURIComponent(
+								item.name
+							)}" data-doctype="Customer Feedback" data-name="${escape(
+					item.name
+				)}">
 								${escape(item.name)}
 							</a>
 						</td>
@@ -312,17 +316,19 @@ frappe.pages["customer-feedback-dashboard"].on_page_load = function (wrapper) {
 					<div class="feedback-panel">
 						<h4>Quick Links</h4>
 						<p>
-							<a href="/app/customer-feedback">
+							<a class="feedback-route-link" href="/desk/customer-feedback"
+								data-route='["List","Customer Feedback"]'>
 								View All Feedback
 							</a>
 						</p>
 						<p>
-							<a href="/app/customer-feedback-settings">
+							<a class="feedback-route-link" href="/desk/customer-feedback-settings"
+								data-route='["Form","Customer Feedback Settings","Customer Feedback Settings"]'>
 								Feedback Settings
 							</a>
 						</p>
 						<p>
-							<a href="/feedback" target="_blank">
+							<a href="/feedback" target="_blank" rel="noopener">
 								Open Public Feedback Portal
 							</a>
 						</p>
@@ -352,6 +358,32 @@ frappe.pages["customer-feedback-dashboard"].on_page_load = function (wrapper) {
 		`);
 
 		page.main.find(".feedback-refresh").on("click", loadDashboard);
+
+		page.main.find(".feedback-route-link").on("click", function (e) {
+			const raw = $(this).attr("data-route");
+			if (!raw) {
+				return;
+			}
+			e.preventDefault();
+			try {
+				const route = JSON.parse(raw);
+				if (Array.isArray(route) && route.length) {
+					frappe.set_route(...route);
+				}
+			} catch (err) {
+				// fall through to href
+			}
+		});
+
+		page.main.find(".feedback-doc-link").on("click", function (e) {
+			const doctype = $(this).attr("data-doctype");
+			const name = $(this).attr("data-name");
+			if (!doctype || !name) {
+				return;
+			}
+			e.preventDefault();
+			frappe.set_route("Form", doctype, name);
+		});
 
 		const trend = data.monthly_trend || [];
 

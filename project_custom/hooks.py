@@ -16,6 +16,9 @@ app_include_js = [
 	"/assets/project_custom/js/role_dashboard_redirect.js",
 	"/assets/project_custom/js/nave_task_dashboard_ui.js",
 ]
+app_include_css = [
+	"/assets/project_custom/css/nave_tasks.css",
+]
 on_login = "project_custom.login.redirect_to_nave_home"
 doctype_js = {
     "Sales Invoice": "public/js/submitted_invoice_edit.js",

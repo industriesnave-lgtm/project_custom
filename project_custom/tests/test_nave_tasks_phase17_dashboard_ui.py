@@ -242,8 +242,8 @@ class TestUiStateContracts(unittest.TestCase):
 
 	def test_task_links_use_valid_nave_task_routes(self):
 		js = UI_JS.read_text(encoding="utf-8")
-		self.assertIn("/app/nave-task/", js)
-		self.assertIn("encodeURIComponent(name", js)
+		self.assertIn('frappe.utils.get_form_link("NAVE Task"', js)
+		self.assertNotIn("/app/nave-task/", js)
 		self.assertNotIn("/app/task/", js)
 
 	def test_truncation_metadata_notice(self):
