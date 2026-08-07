@@ -82,8 +82,19 @@ class TestNaveKpiDrilldown(unittest.TestCase):
 		self.assertIn("due_date: frappe.datetime.get_today()", self.js)
 		self.assertIn("frappe.datetime.add_days(frappe.datetime.get_today(), 1)", self.js)
 		self.assertIn('priority: "High"', self.js)
-		self.assertIn('status: "Completed"', self.js)
 		self.assertIn("completed_on:", self.js)
+
+	def test_completed_today_includes_completed_and_closed(self):
+		# Backend KPI counts Completed + Closed finished today — drilldown must match.
+		self.assertIn('status: ["in", ["Completed", "Closed"]]', self.js)
+		nav_start = self.js.find("const KPI_NAV = {")
+		self.assertGreater(nav_start, 0)
+		block_start = self.js.find("completed_today:", nav_start)
+		self.assertGreater(block_start, nav_start)
+		block = self.js[block_start : block_start + 450]
+		self.assertIn('["in", ["Completed", "Closed"]]', block)
+		self.assertIn("completed_on:", block)
+		self.assertIn('["between"', block)
 
 	def test_overdue_uses_existing_report(self):
 		self.assertIn('report: "NAVE Overdue Tasks"', self.js)
@@ -134,9 +145,18 @@ class TestCustomerFeedbackDrilldown(unittest.TestCase):
 		self.assertIn("average_rating: no meaningful", self.js)
 
 	def test_single_delegated_kpi_handler(self):
-		self.assertIn('off("click.feedbackKpi")', self.js)
+		self.assertIn('off("click.feedbackKpi keydown.feedbackKpi")', self.js)
 		self.assertIn(".feedback-kpi.is-clickable", self.js)
 		self.assertIn('frappe.set_route("List", nav.doctype)', self.js)
+
+	def test_keyboard_activation_reuses_open_kpi_nav(self):
+		self.assertIn('on("keydown.feedbackKpi"', self.js)
+		self.assertIn('e.key !== "Enter"', self.js)
+		self.assertIn('e.key === " "', self.js)
+		self.assertIn("preventDefault", self.js)
+		# Click and keyboard both call the same open_kpi_nav helper.
+		self.assertEqual(self.js.count("open_kpi_nav(KPI_NAV[key])"), 2)
+		self.assertEqual(self.js.count("const open_kpi_nav = (nav) =>"), 1)
 
 	def test_clickable_cursor_affordance(self):
 		self.assertIn(".feedback-kpi.is-clickable", self.js)
