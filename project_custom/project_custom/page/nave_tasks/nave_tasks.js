@@ -566,7 +566,10 @@ frappe.pages["nave-tasks"].on_page_load = function (wrapper) {
 		if (key === "working") APP.state.filters.status = "Working";
 		if (key === "pending") APP.state.filters.status = "Pending";
 		if (key === "completed") APP.state.filters.status = "Completed";
+		if (key === "closed") APP.state.filters.status = "Closed";
 		if (key === "due_today") APP.state.filters.due_date = today_str();
+		if (key === "due_tomorrow") APP.state.filters.due_date = add_days(today_str(), 1);
+		if (key === "high_priority") APP.state.filters.priority = "High";
 		if (key === "due_within_7_days") {
 			APP.state.filters.due_date = "";
 			APP.state._due_before = add_days(today_str(), 7);
@@ -577,6 +580,38 @@ frappe.pages["nave-tasks"].on_page_load = function (wrapper) {
 			APP.state._modified_after = `${add_days(today_str(), -7)} 00:00:00`;
 		}
 		set_view("all_tasks");
+	};
+
+	const apply_dashboard_nav = (nav) => {
+		if (!nav || !nav.view) return;
+		APP.state.filters = {
+			search: "",
+			status: nav.status || "",
+			priority: nav.priority || "",
+			project: "",
+			assigned_user: "",
+			creator: "",
+			due_date: "",
+		};
+		APP.state._due_before = "";
+		APP.state._due_after = "";
+		APP.state._modified_after = "";
+		if (nav.due_date === "today") {
+			APP.state.filters.due_date = today_str();
+		} else if (nav.due_date === "tomorrow") {
+			APP.state.filters.due_date = add_days(today_str(), 1);
+		} else if (nav.due_date) {
+			APP.state.filters.due_date = nav.due_date;
+		}
+		if (nav.view === "overdue_tasks") {
+			set_view("overdue_tasks");
+			return;
+		}
+		if (nav.view === "my_tasks") {
+			set_view("my_tasks");
+			return;
+		}
+		set_view(nav.view || "all_tasks");
 	};
 
 	const render_updates = () => {
@@ -1521,7 +1556,10 @@ frappe.pages["nave-tasks"].on_page_load = function (wrapper) {
 		APP.$view.empty();
 		APP.state.dashboard_controller = frappe.project_custom.mount_nave_task_dashboard(
 			APP.$view,
-			{ embedded: true }
+			{
+				embedded: true,
+				on_view_navigate: apply_dashboard_nav,
+			}
 		);
 	};
 
