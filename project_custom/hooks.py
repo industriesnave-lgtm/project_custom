@@ -186,6 +186,7 @@ extend_bootinfo = "project_custom.boot.extend_bootinfo"
 scheduler_events = {
 	"daily": [
 		"project_custom.api.nave_task.run_daily_nave_task_jobs",
+		"project_custom.project_unbilled_alert_cycle.run_project_unbilled_alert_daily",
 	],
 }
 

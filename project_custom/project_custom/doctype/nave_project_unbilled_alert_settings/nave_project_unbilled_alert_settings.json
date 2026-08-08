@@ -1,0 +1,92 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-08 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "enabled",
+  "threshold_section",
+  "threshold_amount",
+  "ageing_days",
+  "notification_section",
+  "director_emails",
+  "send_email",
+  "create_in_app_notification"
+ ],
+ "fields": [
+  {
+   "default": "0",
+   "description": "When disabled, evaluation/alerts must not run.",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "label": "Enabled"
+  },
+  {
+   "fieldname": "threshold_section",
+   "fieldtype": "Section Break",
+   "label": "Threshold"
+  },
+  {
+   "default": "10000",
+   "description": "Unbilled amount must be strictly greater than this (company currency / INR).",
+   "fieldname": "threshold_amount",
+   "fieldtype": "Currency",
+   "label": "Threshold Amount",
+   "non_negative": 1,
+   "reqd": 1
+  },
+  {
+   "default": "5",
+   "description": "Calendar days after threshold_crossed_on before Director alert is eligible.",
+   "fieldname": "ageing_days",
+   "fieldtype": "Int",
+   "label": "Ageing Days",
+   "non_negative": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "notification_section",
+   "fieldtype": "Section Break",
+   "label": "Notifications"
+  },
+  {
+   "description": "One email address per line (commas/semicolons also accepted).",
+   "fieldname": "director_emails",
+   "fieldtype": "Small Text",
+   "label": "Director Emails"
+  },
+  {
+   "default": "1",
+   "fieldname": "send_email",
+   "fieldtype": "Check",
+   "label": "Send Email"
+  },
+  {
+   "default": "1",
+   "fieldname": "create_in_app_notification",
+   "fieldtype": "Check",
+   "label": "Create In-App Notification"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-08-08 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Project Custom",
+ "name": "NAVE Project Unbilled Alert Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "read": 1,
+   "role": "System Manager",
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

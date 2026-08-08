@@ -1,0 +1,223 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "naming_series:",
+ "creation": "2026-08-08 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "naming_series",
+  "project",
+  "project_name",
+  "company",
+  "customer",
+  "column_break_meta",
+  "cycle_no",
+  "project_status",
+  "alert_status",
+  "amounts_section",
+  "current_expense_amount",
+  "current_billed_amount",
+  "current_unbilled_amount",
+  "threshold_amount",
+  "column_break_amounts",
+  "threshold_crossed_on",
+  "ageing_days",
+  "last_sales_invoice_date",
+  "alert_section",
+  "alert_sent",
+  "alert_sent_on",
+  "resolved_on",
+  "last_evaluated_on",
+  "skip_reason"
+ ],
+ "fields": [
+  {
+   "default": "NPUA-.YYYY.-.#####",
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "hidden": 1,
+   "label": "Naming Series",
+   "options": "NPUA-.YYYY.-.#####",
+   "reqd": 1
+  },
+  {
+   "fieldname": "project",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Project",
+   "options": "Project",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fetch_from": "project.project_name",
+   "fieldname": "project_name",
+   "fieldtype": "Data",
+   "label": "Project Name",
+   "read_only": 1
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "customer",
+   "fieldtype": "Link",
+   "label": "Customer",
+   "options": "Customer",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_meta",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "cycle_no",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Cycle No",
+   "non_negative": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "project_status",
+   "fieldtype": "Data",
+   "label": "Project Status",
+   "read_only": 1
+  },
+  {
+   "default": "Pending",
+   "fieldname": "alert_status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Alert Status",
+   "options": "Pending\nAlerted\nResolved",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "amounts_section",
+   "fieldtype": "Section Break",
+   "label": "Amounts"
+  },
+  {
+   "fieldname": "current_expense_amount",
+   "fieldtype": "Currency",
+   "label": "Current Expense Amount",
+   "read_only": 1
+  },
+  {
+   "fieldname": "current_billed_amount",
+   "fieldtype": "Currency",
+   "label": "Current Billed Amount",
+   "read_only": 1
+  },
+  {
+   "fieldname": "current_unbilled_amount",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Current Unbilled Amount",
+   "read_only": 1
+  },
+  {
+   "fieldname": "threshold_amount",
+   "fieldtype": "Currency",
+   "label": "Threshold Amount",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_amounts",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "threshold_crossed_on",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Threshold Crossed On",
+   "read_only": 1
+  },
+  {
+   "fieldname": "ageing_days",
+   "fieldtype": "Int",
+   "label": "Ageing Days",
+   "read_only": 1
+  },
+  {
+   "fieldname": "last_sales_invoice_date",
+   "fieldtype": "Date",
+   "label": "Last Sales Invoice Date",
+   "read_only": 1
+  },
+  {
+   "fieldname": "alert_section",
+   "fieldtype": "Section Break",
+   "label": "Alert Lifecycle"
+  },
+  {
+   "default": "0",
+   "fieldname": "alert_sent",
+   "fieldtype": "Check",
+   "label": "Alert Sent",
+   "read_only": 1
+  },
+  {
+   "fieldname": "alert_sent_on",
+   "fieldtype": "Datetime",
+   "label": "Alert Sent On",
+   "read_only": 1
+  },
+  {
+   "fieldname": "resolved_on",
+   "fieldtype": "Datetime",
+   "label": "Resolved On",
+   "read_only": 1
+  },
+  {
+   "fieldname": "last_evaluated_on",
+   "fieldtype": "Datetime",
+   "label": "Last Evaluated On",
+   "read_only": 1
+  },
+  {
+   "fieldname": "skip_reason",
+   "fieldtype": "Small Text",
+   "label": "Skip Reason",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-08 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Project Custom",
+ "name": "NAVE Project Unbilled Alert",
+ "naming_rule": "By \"Naming Series\" field",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "project",
+ "track_changes": 1
+}
