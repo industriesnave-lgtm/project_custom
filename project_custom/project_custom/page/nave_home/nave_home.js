@@ -91,6 +91,21 @@ frappe.pages["nave-home"].on_page_load = function (wrapper) {
 			],
 		},
 		{
+			title: "Project Unbilled Expense Alert",
+			description: "Projects with unbilled expense above threshold",
+			icon: "₹",
+			color: "#b45309",
+			route: ["query-report", "NAVE Project Unbilled Expense Alert"],
+			href: "/desk/query-report/NAVE%20Project%20Unbilled%20Expense%20Alert",
+			roles: [
+				"System Manager",
+				"Accounts Manager",
+				"Projects Manager",
+				"NAVE Task Director",
+				"NAVE Task Manager",
+			],
+		},
+		{
 			title: "Customer Feedback",
 			description: "Submitted feedback records and follow-up",
 			icon: "💬",
