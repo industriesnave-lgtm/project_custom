@@ -294,6 +294,11 @@ scheduler_events = {
 # ignore_translatable_strings_from = []
 
 
+override_whitelisted_methods = {
+    "erpnext.accounts.doctype.payment_entry.payment_entry.get_party_details":
+        "project_custom.payment_entry.get_party_details"
+}
+
 
 doc_events = {
     "Journal Entry": {
