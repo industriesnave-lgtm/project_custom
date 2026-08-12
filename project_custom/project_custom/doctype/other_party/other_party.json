@@ -1,0 +1,50 @@
+{
+  "doctype": "DocType",
+  "name": "Other Party",
+  "module": "Project Custom",
+  "autoname": "field:party_name",
+  "naming_rule": "By fieldname",
+  "title_field": "party_name",
+  "allow_rename": 1,
+  "engine": "InnoDB",
+  "field_order": [
+    "party_name"
+  ],
+  "fields": [
+    {
+      "fieldname": "party_name",
+      "fieldtype": "Data",
+      "label": "Party Name",
+      "reqd": 1,
+      "unique": 1
+    }
+  ],
+  "permissions": [
+    {
+      "role": "System Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "delete": 1,
+      "print": 1,
+      "email": 1,
+      "report": 1,
+      "export": 1,
+      "share": 1
+    },
+    {
+      "role": "Accounts User",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "report": 1
+    },
+    {
+      "role": "Accounts Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "report": 1
+    }
+  ]
+}
