@@ -60,6 +60,42 @@ def ensure_custom_fields():
 			"read_only": 1,
 			"no_copy": 1,
 		},
+{
+    "dt": "Project",
+    "label": "Total Payroll Manpower Cost",
+    "fieldname": "custom_total_payroll_manpower_cost",
+    "fieldtype": "Currency",
+    "insert_after": "custom_total_journal_entry_cost",
+    "read_only": 1,
+    "no_copy": 1,
+},
+{
+    "dt": "Project",
+    "label": "Total Cost Including Journal & Payroll",
+    "fieldname": "custom_total_cost_including_journal_and_payroll",
+    "fieldtype": "Currency",
+    "insert_after": "custom_total_payroll_manpower_cost",
+    "read_only": 1,
+    "no_copy": 1,
+},
+{
+    "dt": "Project",
+    "label": "Gross Margin Including Journal & Payroll",
+    "fieldname": "custom_gross_margin_including_journal_and_payroll",
+    "fieldtype": "Currency",
+    "insert_after": "custom_gross_margin_including_journal_entry",
+    "read_only": 1,
+    "no_copy": 1,
+},
+{
+    "dt": "Project",
+    "label": "Gross Margin % Including Journal & Payroll",
+    "fieldname": "custom_gross_margin_percent_including_journal_and_payroll",
+    "fieldtype": "Percent",
+    "insert_after": "custom_gross_margin_including_journal_and_payroll",
+    "read_only": 1,
+    "no_copy": 1,
+},
 	]
 
 	for field in fields:
