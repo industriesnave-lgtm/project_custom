@@ -114,4 +114,18 @@ def recalculate_all_project_journal_entry_costs():
 
 def after_migrate():
 	ensure_custom_fields()
+	ensure_expense_claim_payable_account_rule()
 	recalculate_all_project_journal_entry_costs()
+
+
+def ensure_expense_claim_payable_account_rule():
+        frappe.make_property_setter(
+                {
+                        "doctype": "Expense Claim",
+                        "doctype_or_field": "DocField",
+                        "fieldname": "payable_account",
+                        "property": "mandatory_depends_on",
+                        "value": 'eval:doc.workflow_state=="Pending Accounts Payment"',
+                        "property_type": "Data",
+                }
+        )
