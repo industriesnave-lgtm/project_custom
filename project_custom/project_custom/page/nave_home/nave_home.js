@@ -29,6 +29,21 @@ frappe.pages["nave-home"].on_page_load = function (wrapper) {
 				"System Manager",
 			],
 		},
+                {
+                        title: "Opportunity Dashboard",
+                        description: "Opportunity pipeline, follow-ups and sales progress",
+                        icon: "🎯",
+                        color: "#7c3aed",
+                        route: ["opportunity-dashboard"],
+                        href: "/desk/opportunity-dashboard",
+                        roles: [
+                                "Sales User",
+                                "Sales Manager",
+                                "Nave CRM User",
+                                "Nave CRM Manager",
+                                "System Manager",
+                        ],
+                },
 		{
 			title: "Sales",
 			description: "Sales performance, orders and collections",
@@ -112,15 +127,6 @@ frappe.pages["nave-home"].on_page_load = function (wrapper) {
 			color: "#e34b4b",
 			route: ["List", "Customer Feedback"],
 			href: "/desk/customer-feedback",
-			roles: ["System Manager"],
-		},
-		{
-			title: "Customer Feedback Dashboard",
-			description: "Customer satisfaction and follow-up",
-			icon: "⭐",
-			color: "#e34b4b",
-			route: ["customer-feedback-dashboard"],
-			href: "/desk/customer-feedback-dashboard",
 			roles: ["System Manager"],
 		},
 	];
