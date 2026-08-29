@@ -306,5 +306,8 @@ doc_events = {
         "on_submit": "project_custom.project_cost.recalculate_for_journal_entry",
         "on_update_after_submit": "project_custom.project_cost.recalculate_for_journal_entry",
         "on_cancel": "project_custom.project_cost.recalculate_for_journal_entry",
-    }
+    },
+    "Expense Claim": {
+        "on_update": "project_custom.expense_claim_workflow.handle_expense_claim_update",
+    },
 }
