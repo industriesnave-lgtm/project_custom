@@ -170,3 +170,46 @@ def recalculate_project_cost_summary(project):
             "custom_total_payroll_manpower_cost",
         ),
     }
+
+
+@frappe.whitelist(methods=["POST"])
+def reset_project_gross_margin_percent(project):
+    if "System Manager" not in frappe.get_roles():
+        frappe.throw(
+            "Only System Manager can reset Project gross margin percent.",
+            frappe.PermissionError,
+        )
+
+    if not frappe.db.exists("Project", project):
+        frappe.throw(f"Project not found: {project}")
+
+    total_billed_amount = frappe.db.get_value(
+        "Project",
+        project,
+        "total_billed_amount",
+    ) or 0
+
+    gross_margin = frappe.db.get_value(
+        "Project",
+        project,
+        "gross_margin",
+    ) or 0
+
+    if total_billed_amount != 0 or gross_margin != 0:
+        frappe.throw(
+            "Gross margin percent can only be reset when billed amount and gross margin are both zero."
+        )
+
+    frappe.db.set_value(
+        "Project",
+        project,
+        "per_gross_margin",
+        0,
+        update_modified=False,
+    )
+
+    return {
+        "success": True,
+        "project": project,
+        "per_gross_margin": 0,
+    }
