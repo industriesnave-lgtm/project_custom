@@ -141,3 +141,32 @@ def recalculate_project_journal_entry_cost(project):
         },
         update_modified=False,
     )
+
+
+@frappe.whitelist(methods=["POST"])
+def recalculate_project_cost_summary(project):
+    if "System Manager" not in frappe.get_roles():
+        frappe.throw(
+            "Only System Manager can recalculate Project costing.",
+            frappe.PermissionError,
+        )
+
+    if not frappe.db.exists("Project", project):
+        frappe.throw(f"Project not found: {project}")
+
+    recalculate_project_journal_entry_cost(project)
+
+    return {
+        "success": True,
+        "project": project,
+        "journal_entry_cost": frappe.db.get_value(
+            "Project",
+            project,
+            "custom_total_journal_entry_cost",
+        ),
+        "payroll_manpower_cost": frappe.db.get_value(
+            "Project",
+            project,
+            "custom_total_payroll_manpower_cost",
+        ),
+    }
