@@ -44,7 +44,7 @@ def scan_project_links(project):
 
             table = f"tab{doctype}"
 
-            if not frappe.db.table_exists(table):
+            if not frappe.db.table_exists(doctype):
                 continue
 
             for fieldname in project_fields:
@@ -123,7 +123,7 @@ def plan_project_transfer(source_project, target_project):
 
         table = f"tab{doctype}"
 
-        if not frappe.db.table_exists(table):
+        if not frappe.db.table_exists(doctype):
             continue
 
         for fieldname in project_fields:
