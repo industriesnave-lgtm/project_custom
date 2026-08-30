@@ -304,6 +304,7 @@ override_whitelisted_methods = {
 doc_events = {
     "Project": {
         "validate": "project_custom.project_guard.validate_project_status",
+        "on_trash": "project_custom.project_guard.prevent_unauthorized_project_delete",
     },
     "Journal Entry": {
         "before_update_after_submit": "project_custom.project_cost.store_previous_project",

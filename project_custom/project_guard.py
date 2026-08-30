@@ -26,3 +26,13 @@ def validate_project_status(doc, method=None):
         "Only Administrator or erp@naveindustries.com can close or cancel a Project.",
         frappe.PermissionError,
     )
+
+
+def prevent_unauthorized_project_delete(doc, method=None):
+    if frappe.session.user in ALLOWED_PROJECT_CLOSERS:
+        return
+
+    frappe.throw(
+        "Only Administrator or erp@naveindustries.com can delete a Project.",
+        frappe.PermissionError,
+    )
