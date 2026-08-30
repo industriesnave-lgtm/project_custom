@@ -302,6 +302,9 @@ override_whitelisted_methods = {
 
 
 doc_events = {
+    "Project": {
+        "validate": "project_custom.project_guard.validate_project_status",
+    },
     "Journal Entry": {
         "before_update_after_submit": "project_custom.project_cost.store_previous_project",
         "on_submit": "project_custom.project_cost.recalculate_for_journal_entry",
