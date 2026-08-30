@@ -114,6 +114,7 @@ def recalculate_all_project_journal_entry_costs():
 
 def after_migrate():
 	ensure_custom_fields()
+	create_project_do_not_use_field()
 	ensure_expense_claim_payable_account_rule()
 	recalculate_all_project_journal_entry_costs()
 
@@ -129,3 +130,20 @@ def ensure_expense_claim_payable_account_rule():
                         "property_type": "Data",
                 }
         )
+
+
+def create_project_do_not_use_field():
+    from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
+
+    create_custom_fields({
+        "Project": [
+            {
+                "fieldname": "custom_do_not_use",
+                "label": "Do Not Use",
+                "fieldtype": "Check",
+                "default": "0",
+                "insert_after": "status",
+                "description": "Archived project. Prevents future selection in Project link fields.",
+            }
+        ]
+    })

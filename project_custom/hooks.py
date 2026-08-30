@@ -25,6 +25,7 @@ doctype_js = {
     "Purchase Invoice": "public/js/submitted_invoice_edit.js",
 }
 permission_query_conditions = {
+    "Project": "project_custom.permissions.project.get_project_query_conditions",
     "NAVE Task": "project_custom.permissions.nave_task.get_task_query_conditions",
     "NAVE Task Update": "project_custom.permissions.nave_task.get_update_query_conditions",
 }
