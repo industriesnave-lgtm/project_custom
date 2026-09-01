@@ -15,3 +15,4 @@ project_custom.patches.v1_5.normalize_support_required_values
 project_custom.patches.v1_7.delete_nave_task_dashboard_page
 project_custom.patches.v1_8_add_other_party_type
 project_custom.patches.v1_9_add_payroll_project_cost_fields
+project_custom.patches.v1_10.add_sales_order_pending_invoice_report_to_selling
