@@ -44,6 +44,18 @@ def get_columns():
             "width": 180,
         },
         {
+            "label": _("Customer PO No."),
+            "fieldname": "po_no",
+            "fieldtype": "Data",
+            "width": 150,
+        },
+        {
+            "label": _("Customer PO Date"),
+            "fieldname": "po_date",
+            "fieldtype": "Date",
+            "width": 120,
+        },
+        {
             "label": _("Project"),
             "fieldname": "project",
             "fieldtype": "Link",
@@ -183,6 +195,8 @@ def get_data(filters):
             so.transaction_date,
             so.customer,
             so.customer_name,
+            so.po_no,
+            so.po_date,
             so.project,
             so.status AS so_status,
             so.currency,
