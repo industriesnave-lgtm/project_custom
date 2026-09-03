@@ -34,7 +34,7 @@ frappe.pages["nave-home"].on_page_load = function (wrapper) {
                         description: "Opportunity pipeline, follow-ups and sales progress",
                         icon: "🎯",
                         color: "#7c3aed",
-                        route: ["opportunity-dashboard"],
+                        route: ["Workspaces", "Opportunity Dashboard"],
                         href: "/desk/opportunity-dashboard",
                         roles: [
                                 "Sales User",
