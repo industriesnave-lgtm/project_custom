@@ -29,6 +29,7 @@ frappe.pages["nave-home"].on_page_load = function (wrapper) {
 				"System Manager",
 			],
 		},
+
                 {
                         title: "Opportunity Dashboard",
                         description: "Opportunity pipeline, follow-ups and sales progress",
@@ -89,6 +90,19 @@ frappe.pages["nave-home"].on_page_load = function (wrapper) {
 			href: "/desk/project",
 			roles: ["Projects User", "Projects Manager"],
 		},
+                {
+                        title: "Site Daily P&L",
+                        description: "Daily work value, manpower cost, site costs and profitability",
+                        icon: "📊",
+                        color: "#16a36a",
+                        route: ["site-daily-pl"],
+                        href: "/desk/site-daily-pl",
+                        roles: [
+                                "Projects User",
+                                "Projects Manager",
+                                "System Manager",
+                        ],
+                },
 		{
 			title: "Operations",
 			description: "Production, stock and quality operations",
