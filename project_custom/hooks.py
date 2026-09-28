@@ -23,6 +23,7 @@ on_login = "project_custom.login.redirect_to_nave_home"
 doctype_js = {
     "Sales Invoice": "public/js/submitted_invoice_edit.js",
     "Purchase Invoice": "public/js/submitted_invoice_edit.js",
+    "Quotation": "public/js/quotation.js",
 }
 permission_query_conditions = {
     "Project": "project_custom.permissions.project.get_project_query_conditions",
