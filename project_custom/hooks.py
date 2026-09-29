@@ -24,6 +24,7 @@ doctype_js = {
     "Sales Invoice": "public/js/submitted_invoice_edit.js",
     "Purchase Invoice": "public/js/submitted_invoice_edit.js",
     "Quotation": "public/js/quotation.js",
+    "Sales Order": "public/js/sales_order_revision.js",
 }
 permission_query_conditions = {
     "Project": "project_custom.permissions.project.get_project_query_conditions",
@@ -303,6 +304,9 @@ override_whitelisted_methods = {
 
 
 doc_events = {
+    "Sales Invoice": {
+        "validate": "project_custom.sales_order_revision.validate_sales_invoice_qty",
+    },
     "Project": {
         "validate": "project_custom.project_guard.validate_project_status",
         "on_trash": "project_custom.project_guard.prevent_unauthorized_project_delete",
