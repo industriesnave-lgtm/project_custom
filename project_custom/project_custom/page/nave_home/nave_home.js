@@ -143,6 +143,15 @@ frappe.pages["nave-home"].on_page_load = function (wrapper) {
 			href: "/desk/customer-feedback",
 			roles: ["System Manager"],
 		},
+		{
+			title: "NAVE Block Registry",
+			description: "Manage blocked persons, suppliers and customers",
+			icon: "🚫",
+			color: "#dc2626",
+			route: ["nave-block-registry-dashboard"],
+			href: "/desk/nave-block-registry-dashboard",
+			roles: ["System Manager"],
+		},
 	];
 
 	const visible_cards = cards.filter((card) => has_role(card.roles));

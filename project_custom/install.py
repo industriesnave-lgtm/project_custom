@@ -113,10 +113,11 @@ def recalculate_all_project_journal_entry_costs():
 
 
 def after_migrate():
-	ensure_custom_fields()
-	create_project_do_not_use_field()
-	ensure_expense_claim_payable_account_rule()
-	recalculate_all_project_journal_entry_costs()
+        ensure_custom_fields()
+        create_project_do_not_use_field()
+        ensure_expense_claim_payable_account_rule()
+        recalculate_all_project_journal_entry_costs()
+        ensure_nave_block_registry_sidebar()
 
 
 def ensure_expense_claim_payable_account_rule():
@@ -147,3 +148,55 @@ def create_project_do_not_use_field():
             }
         ]
     })
+
+
+def ensure_nave_block_registry_sidebar():
+    if not frappe.db.exists("Workspace Sidebar", "Project Custom"):
+        return
+
+    sidebar = frappe.get_doc(
+        "Workspace Sidebar",
+        "Project Custom",
+    )
+
+    existing = [
+        row for row in sidebar.items
+        if row.label == "NAVE Block Registry"
+    ]
+
+    for row in existing:
+        sidebar.items.remove(row)
+
+    reports_index = next(
+        (
+            index
+            for index, row in enumerate(sidebar.items)
+            if row.label == "Reports"
+            and row.type == "Section Break"
+        ),
+        len(sidebar.items),
+    )
+
+    sidebar.append(
+        "items",
+        {
+            "child": 1,
+            "collapsible": 1,
+            "icon": "shield",
+            "indent": 0,
+            "keep_closed": 0,
+            "label": "NAVE Block Registry",
+            "link_to": "nave-block-registry-dashboard",
+            "link_type": "Page",
+            "show_arrow": 0,
+            "type": "Link",
+        },
+    )
+
+    block_row = sidebar.items.pop()
+    sidebar.items.insert(reports_index, block_row)
+
+    for index, row in enumerate(sidebar.items, start=1):
+        row.idx = index
+
+    sidebar.save(ignore_permissions=True)

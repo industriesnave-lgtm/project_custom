@@ -9,6 +9,7 @@ before_migrate = "project_custom.install.before_migrate"
 after_migrate = [
     "project_custom.install.after_migrate",
     "project_custom.employee_customization.setup_employee_custom_fields",
+    "project_custom.party_identity.setup_party_identity_fields",
 ]
 
 override_doctype_dashboards = {
@@ -308,7 +309,19 @@ override_whitelisted_methods = {
 
 doc_events = {
     "Sales Invoice": {
-        "validate": "project_custom.sales_order_revision.validate_sales_invoice_qty",
+        "validate": [
+            "project_custom.sales_order_revision.validate_sales_invoice_qty",
+            "project_custom.block_registry.validate_customer_transaction",
+        ],
+    },
+    "Sales Order": {
+        "validate": "project_custom.block_registry.validate_customer_transaction",
+    },
+    "Purchase Order": {
+        "validate": "project_custom.block_registry.validate_supplier_transaction",
+    },
+    "Purchase Invoice": {
+        "validate": "project_custom.block_registry.validate_supplier_transaction",
     },
     "Project": {
         "validate": "project_custom.project_guard.validate_project_status",
@@ -324,6 +337,21 @@ doc_events = {
         "on_update": "project_custom.expense_claim_workflow.handle_expense_claim_update",
     },
     "Employee": {
-        "validate": "project_custom.employee_customization.validate_employee",
+        "validate": [
+            "project_custom.employee_customization.validate_employee",
+            "project_custom.block_registry.validate_employee_block",
+        ],
+    },
+    "Supplier": {
+        "validate": [
+            "project_custom.party_identity.validate_party_gstin",
+            "project_custom.block_registry.validate_supplier_block",
+        ],
+    },
+    "Customer": {
+        "validate": [
+            "project_custom.party_identity.validate_party_gstin",
+            "project_custom.block_registry.validate_customer_block",
+        ],
     },
 }

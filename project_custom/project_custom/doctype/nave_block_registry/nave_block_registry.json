@@ -1,0 +1,207 @@
+{
+ "doctype": "DocType",
+ "name": "NAVE Block Registry",
+ "module": "Project Custom",
+ "autoname": "NBR-.#####",
+ "title_field": "party_name",
+ "allow_rename": 0,
+ "track_changes": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "block_details_section",
+  "party_type",
+  "person_category",
+  "party_name",
+  "status",
+  "identity_section",
+  "aadhaar_number",
+  "gstin",
+  "pan_number",
+  "contact_section",
+  "mobile_number",
+  "email",
+  "incident_section",
+  "reason_category",
+  "incident_date",
+  "block_date",
+  "detailed_reason",
+  "supporting_document",
+  "audit_section",
+  "blocked_by",
+  "revocation_section",
+  "revoked_date",
+  "revoked_by",
+  "revocation_reason"
+ ],
+ "fields": [
+  {
+   "fieldname": "block_details_section",
+   "fieldtype": "Section Break",
+   "label": "Block Details"
+  },
+  {
+   "fieldname": "party_type",
+   "fieldtype": "Select",
+   "label": "Party Type",
+   "options": "Person\nSupplier / Vendor\nCustomer",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "person_category",
+   "fieldtype": "Select",
+   "label": "Person Category",
+   "options": "\nEmployee\nEx-Employee\nJob Applicant\nInterview Candidate\nIntern\nTrainee\nSite Worker\nOther",
+   "depends_on": "eval:doc.party_type=='Person'"
+  },
+  {
+   "fieldname": "party_name",
+   "fieldtype": "Data",
+   "label": "Name",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Status",
+   "options": "Active\nRevoked",
+   "default": "Active",
+   "reqd": 1,
+   "in_list_view": 1,
+   "read_only": 0
+  },
+  {
+   "fieldname": "identity_section",
+   "fieldtype": "Section Break",
+   "label": "Identity"
+  },
+  {
+   "fieldname": "aadhaar_number",
+   "fieldtype": "Data",
+   "label": "Aadhaar Number",
+   "depends_on": "eval:doc.party_type=='Person'",
+   "description": "Mandatory for Person. Enter exactly 12 numeric digits.",
+   "mandatory_depends_on": "eval:doc.party_type=='Person'"
+  },
+  {
+   "fieldname": "gstin",
+   "fieldtype": "Data",
+   "label": "GSTIN",
+   "depends_on": "eval:doc.party_type=='Supplier / Vendor' || doc.party_type=='Customer'",
+   "description": "Mandatory for Supplier / Vendor and Customer.",
+   "mandatory_depends_on": "eval:doc.party_type=='Supplier / Vendor' || doc.party_type=='Customer'"
+  },
+  {
+   "fieldname": "pan_number",
+   "fieldtype": "Data",
+   "label": "PAN Number",
+   "depends_on": "eval:doc.party_type=='Supplier / Vendor' || doc.party_type=='Customer'",
+   "description": "Optional PAN Number."
+  },
+  {
+   "fieldname": "contact_section",
+   "fieldtype": "Section Break",
+   "label": "Contact Details"
+  },
+  {
+   "fieldname": "mobile_number",
+   "fieldtype": "Data",
+   "label": "Mobile Number"
+  },
+  {
+   "fieldname": "email",
+   "fieldtype": "Data",
+   "label": "Email",
+   "options": "Email"
+  },
+  {
+   "fieldname": "incident_section",
+   "fieldtype": "Section Break",
+   "label": "Block / Incident Details"
+  },
+  {
+   "fieldname": "reason_category",
+   "fieldtype": "Select",
+   "label": "Reason Category",
+   "options": "Misconduct\nAbusive Behaviour\nFraud\nTheft\nSafety Violation\nDocument Issue\nAbsconding\nPayment Default\nQuality Issue\nCommercial Dispute\nCompliance Issue\nOther",
+   "reqd": 1
+  },
+  {
+   "fieldname": "incident_date",
+   "fieldtype": "Date",
+   "label": "Incident Date"
+  },
+  {
+   "fieldname": "block_date",
+   "fieldtype": "Date",
+   "label": "Block Date",
+   "default": "Today",
+   "reqd": 1
+  },
+  {
+   "fieldname": "detailed_reason",
+   "fieldtype": "Small Text",
+   "label": "Detailed Reason",
+   "reqd": 1
+  },
+  {
+   "fieldname": "supporting_document",
+   "fieldtype": "Attach",
+   "label": "Supporting Document"
+  },
+  {
+   "fieldname": "audit_section",
+   "fieldtype": "Section Break",
+   "label": "Audit"
+  },
+  {
+   "fieldname": "blocked_by",
+   "fieldtype": "Link",
+   "label": "Blocked By",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "revocation_section",
+   "fieldtype": "Section Break",
+   "label": "Revocation",
+   "depends_on": "eval:doc.status=='Revoked'"
+  },
+  {
+   "fieldname": "revoked_date",
+   "fieldtype": "Date",
+   "label": "Revoked Date",
+   "depends_on": "eval:doc.status=='Revoked'",
+   "read_only": 1
+  },
+  {
+   "fieldname": "revoked_by",
+   "fieldtype": "Link",
+   "label": "Revoked By",
+   "options": "User",
+   "read_only": 1,
+   "depends_on": "eval:doc.status=='Revoked'"
+  },
+  {
+   "fieldname": "revocation_reason",
+   "fieldtype": "Small Text",
+   "label": "Revocation Reason",
+   "depends_on": "eval:doc.status=='Revoked'"
+  }
+ ],
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1,
+   "print": 1,
+   "email": 1,
+   "report": 1,
+   "export": 1,
+   "share": 1
+  }
+ ]
+}
