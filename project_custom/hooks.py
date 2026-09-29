@@ -6,7 +6,10 @@ app_email = "industriesnave@gmail.com"
 
 after_install = "project_custom.install.after_install"
 before_migrate = "project_custom.install.before_migrate"
-after_migrate = "project_custom.install.after_migrate"
+after_migrate = [
+    "project_custom.install.after_migrate",
+    "project_custom.employee_customization.setup_employee_custom_fields",
+]
 
 override_doctype_dashboards = {
     "Project": "project_custom.dashboard.get_project_dashboard"
@@ -319,5 +322,8 @@ doc_events = {
     },
     "Expense Claim": {
         "on_update": "project_custom.expense_claim_workflow.handle_expense_claim_update",
+    },
+    "Employee": {
+        "validate": "project_custom.employee_customization.validate_employee",
     },
 }
