@@ -32,7 +32,6 @@ def validate_sales_invoice_qty(doc, method=None):
                 si.docstatus = 1
                 AND sii.so_detail = %s
                 AND si.name != %s
-                AND IFNULL(si.is_return, 0) = 0
             """,
             (row.so_detail, doc.name or ""),
         )[0][0] or 0
