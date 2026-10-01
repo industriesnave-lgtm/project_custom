@@ -318,7 +318,10 @@ doc_events = {
         "validate": "project_custom.block_registry.validate_customer_transaction",
     },
     "Purchase Order": {
-        "validate": "project_custom.block_registry.validate_supplier_transaction",
+        "validate": [
+            "project_custom.purchase_order_dispatch.set_supplier_dispatch_address",
+            "project_custom.block_registry.validate_supplier_transaction",
+        ],
     },
     "Purchase Invoice": {
         "validate": "project_custom.block_registry.validate_supplier_transaction",
