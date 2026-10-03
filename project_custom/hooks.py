@@ -25,6 +25,8 @@ app_include_css = [
 ]
 on_login = "project_custom.login.redirect_to_nave_home"
 doctype_js = {
+    "Material Request": "public/js/material_request.js",
+
     "Sales Invoice": "public/js/submitted_invoice_edit.js",
     "Purchase Invoice": "public/js/submitted_invoice_edit.js",
     "Quotation": "public/js/quotation.js",
@@ -308,6 +310,10 @@ override_whitelisted_methods = {
 
 
 doc_events = {
+    "Material Request": {
+        "validate": "project_custom.material_request.set_project_on_items",
+        "on_update": "project_custom.material_request.send_material_request_workflow_email",
+    },
     "Sales Invoice": {
         "validate": [
             "project_custom.sales_order_revision.validate_sales_invoice_qty",
@@ -358,3 +364,8 @@ doc_events = {
         ],
     },
 }
+
+
+after_migrate = [
+    "project_custom.material_request_workflow.setup_material_request_workflow",
+]
