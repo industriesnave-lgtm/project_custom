@@ -327,10 +327,14 @@ doc_events = {
         "validate": [
             "project_custom.purchase_order_dispatch.set_supplier_dispatch_address",
             "project_custom.block_registry.validate_supplier_transaction",
+            "project_custom.purchase_controls.validate_purchase_order_source",
         ],
     },
     "Purchase Invoice": {
-        "validate": "project_custom.block_registry.validate_supplier_transaction",
+        "validate": [
+            "project_custom.block_registry.validate_supplier_transaction",
+            "project_custom.purchase_controls.validate_purchase_invoice_controls",
+        ],
     },
     "Project": {
         "validate": "project_custom.project_guard.validate_project_status",
