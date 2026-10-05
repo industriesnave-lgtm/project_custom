@@ -245,7 +245,9 @@ def _build_material_request_email(doc, heading):
             """.format(
                 item_code=frappe.utils.escape_html(item.item_code or ""),
                 description=frappe.utils.escape_html(
-                    item.description or item.item_name or ""
+                    frappe.utils.strip_html(
+                        item.description or item.item_name or ""
+                    )
                 ),
                 requested_qty=flt(item.qty),
                 approved_qty=flt(item.custom_approved_qty),
