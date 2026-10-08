@@ -120,12 +120,12 @@ frappe.pages["nave-home"].on_page_load = function (wrapper) {
 			],
 		},
 		{
-			title: "Project Unbilled Expense Alert",
-			description: "Projects with unbilled expense above threshold",
-			icon: "₹",
+			title: "Project Financial Dashboard",
+			description: "Monthly billing and unbilled expense monitoring",
+			icon: "📊",
 			color: "#b45309",
-			route: ["query-report", "NAVE Project Unbilled Expense Alert"],
-			href: "/desk/query-report/NAVE%20Project%20Unbilled%20Expense%20Alert",
+			route: ["project-financial-dashboard"],
+			href: "/desk/project-financial-dashboard",
 			roles: [
 				"System Manager",
 				"Accounts Manager",
