@@ -10,6 +10,8 @@ after_migrate = [
     "project_custom.install.after_migrate",
     "project_custom.employee_customization.setup_employee_custom_fields",
     "project_custom.party_identity.setup_party_identity_fields",
+    "project_custom.material_request_workflow.setup_material_request_workflow",
+    "project_custom.material_request_permissions_setup.setup_material_request_permissions",
 ]
 
 override_doctype_dashboards = {
@@ -34,12 +36,14 @@ doctype_js = {
 }
 permission_query_conditions = {
     "Project": "project_custom.permissions.project.get_project_query_conditions",
+    "Material Request": "project_custom.permissions.material_request.get_material_request_query_conditions",
     "NAVE Task": "project_custom.permissions.nave_task.get_task_query_conditions",
     "NAVE Task Update": "project_custom.permissions.nave_task.get_update_query_conditions",
 }
 
 has_permission = {
     "NAVE Task": "project_custom.permissions.nave_task.has_task_permission",
+    "Material Request": "project_custom.permissions.material_request.has_material_request_permission",
     "NAVE Task Update": "project_custom.permissions.nave_task.has_update_permission",
 }
 # Apps

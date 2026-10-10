@@ -11,7 +11,7 @@ frappe.ui.form.on("Material Request", {
 function set_approved_qty_access(frm) {
     const can_edit =
         frm.doc.workflow_state === "Pending PM Approval" &&
-        frappe.user.has_role("Projects Manager");
+        frappe.user.has_role("NAVE Material Request Approver");
 
     frm.fields_dict.items.grid.update_docfield_property(
         "custom_approved_qty",

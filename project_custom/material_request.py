@@ -53,6 +53,55 @@ def set_project_on_items(doc, method=None):
 
     previous_state = _get_previous_state(doc)
     current_state = doc.workflow_state
+    old_doc = doc.get_doc_before_save()
+
+    if not doc.custom_project:
+        frappe.throw(_("Project is mandatory."))
+
+    if old_doc and previous_state == "Pending PM Approval":
+        if doc.custom_project != old_doc.custom_project:
+            frappe.throw(
+                _("Project cannot be changed after sending for approval.")
+            )
+
+        old_items = {item.name: item for item in old_doc.items}
+        new_items = {item.name: item for item in doc.items}
+
+        if set(old_items) != set(new_items):
+            frappe.throw(
+                _("Items cannot be added or removed during PM approval.")
+            )
+
+        for item in doc.items:
+            old_item = old_items[item.name]
+            if (
+                item.item_code != old_item.item_code
+                or flt(item.qty) != flt(old_item.qty)
+            ):
+                frappe.throw(
+                    _("Item and Requested Qty cannot change during PM approval.")
+                )
+
+    if current_state in ("Draft", "Rejected", "Pending PM Approval"):
+        if current_state != "Pending PM Approval" or (
+            previous_state != "Pending PM Approval"
+        ):
+            if old_doc:
+                old_qty = {
+                    item.name: flt(item.custom_approved_qty)
+                    for item in old_doc.items
+                }
+                for item in doc.items:
+                    if flt(item.custom_approved_qty) != old_qty.get(item.name, 0):
+                        frappe.throw(
+                            _("Only the assigned PM can change Approved Qty.")
+                        )
+            else:
+                for item in doc.items:
+                    if flt(item.custom_approved_qty):
+                        frappe.throw(
+                            _("Approved Qty must be zero when creating a request.")
+                        )
 
     # ---------------------------------------------------------
     # 1. Header Project -> Item Project
