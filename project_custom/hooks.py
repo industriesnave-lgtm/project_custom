@@ -10,8 +10,8 @@ after_migrate = [
     "project_custom.install.after_migrate",
     "project_custom.employee_customization.setup_employee_custom_fields",
     "project_custom.party_identity.setup_party_identity_fields",
-    "project_custom.material_request_workflow.setup_material_request_workflow",
     "project_custom.material_request_permissions_setup.setup_material_request_permissions",
+    "project_custom.material_request_workflow.setup_material_request_workflow",
 ]
 
 override_doctype_dashboards = {
